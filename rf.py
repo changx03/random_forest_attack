@@ -32,7 +32,20 @@ def main():
 
     # An array of DecisionTreeClassifier
     estimators = model.estimators_
-    tree1 = estimators[0]
+    trees = []
+    predictions = []
+    indicators = []
+    trees = []
+    features = []
+    thresholds = []
+    for estimator in estimators:
+        predictions.append(estimator.predict(X_test))
+        indicator = estimator.decision_path(X_test)
+        indicators.append(indicator.toarray())
+        tree = estimator.tree_
+        trees.append(tree)
+        features.append(tree.feature)
+        thresholds.append(tree.threshold)    
 
     indicator, n_node_ptr = model.decision_path(X_test)
 

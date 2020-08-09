@@ -51,3 +51,7 @@ geckodriver.log
 *.code-workspace
 .history
 .vscode
+
+# output files
+Source.gv
+Source.gv.pdf
