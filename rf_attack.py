@@ -55,6 +55,11 @@ def main():
     pred = np.squeeze(model.predict(X_test))
     print('X = {}, y = {}, pred = {}'.format(str(X_test), y_test, pred))
 
+    # Create an updating table
+    max_depth = X_test.shape[1]
+    update_table = np.repeat(X_test, max_depth, axis=0)
+    current_idx = 0
+
     # An array of DecisionTreeClassifier
     estimators = model.estimators_
     paths = []
