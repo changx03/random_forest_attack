@@ -8,3 +8,33 @@
 ## Problem
 
 Exist the current branch when there is not enough budget to spend.
+
+## Pseudocode
+
+* Input: 
+    * X: Input example
+    * y: Output label 
+    * estimators: Multiple Decision Trees in a RF
+    * budget: Maximum perturbation
+* Output: 
+    * X_adv: Adversarial example
+
+```python
+x_stack = [X]
+directions = [zeros_of_number_of_features] # Keeps the direction of updates
+while predict(X) == y and budget > 0:
+    paths = []
+    for estimator in estimators:
+        path = build_path(x_stack[-1], estimator)
+        paths.append(path)
+    
+    # Find optimal update
+    x_next, path, direction = find_optimal_update(paths, directions[-1])
+    if predict(x_next) != y:
+        return x_next # Found x_adv. Done.
+    x_stack.append(x_next)
+    directions.append(direction)
+    budget -= path.cost
+
+    
+```

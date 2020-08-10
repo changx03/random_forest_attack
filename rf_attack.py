@@ -55,10 +55,8 @@ def main():
     pred = np.squeeze(model.predict(X_test))
     print('X = {}, y = {}, pred = {}'.format(str(X_test), y_test, pred))
 
-    # Create an updating table
-    max_depth = X_test.shape[1]
-    update_table = np.repeat(X_test, max_depth, axis=0)
-    current_idx = 0
+    # Create a lookup table to keep tracking the updates
+    x_stack = [X_test.flatten()]  # Don't want np array wrapper
 
     # An array of DecisionTreeClassifier
     estimators = model.estimators_
@@ -81,15 +79,32 @@ def main():
         path = Path(X_test.flatten(), feature, threshold, is_pred_correct)
         paths.append(path)
 
+    # TODO: If cannot find viable path, goes one step up.
     min_idx = -1
     min_cost = np.inf
+    min_path = None
     for i, path in enumerate(paths):
         print('Path {} has cost {:.3f}'.format(i, path.cost))
         if min_cost > path.cost:
             min_idx = i
             min_cost = path.cost
+            min_path = path
 
     print('Path {} has min. cost {:.3f}'.format(min_idx, min_cost))
+
+    # Compute new value
+    feature_idx = min_path.feature[-1]
+    cost = min_path.cost + epsilon
+    threshold = min_path.threshold
+    value = x_stack[-1][feature_idx]
+    value = value + cost if value <= threshold[-1] else value - cost
+
+    # Update new value to the next row in lookup table
+    x_next = np.copy(x_stack[-1])
+    x_next[feature_idx] = value
+    x_stack.append(x_next)
+
+    print('Debug line')
 
 
 if __name__ == '__main__':
