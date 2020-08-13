@@ -193,8 +193,8 @@ def random_forest_attack(model, x, y):
 def main():
     # Preparing data
     X, Y = make_classification(n_samples=n_samples, random_state=random_state,
-                            n_features=3, n_redundant=0, n_informative=3,
-                            n_clusters_per_class=1, class_sep=1.0)
+                               n_features=3, n_redundant=0, n_informative=3,
+                               n_clusters_per_class=1, class_sep=1.0)
 
     # Rescaling to [-1, 1]
     X_max = np.max(X, axis=0)
@@ -217,12 +217,16 @@ def main():
         # Select a single example
         x = np.expand_dims(x, axis=0)
         y = np.expand_dims(y, axis=0).astype(np.int64)
-        print('{:12s}: X = {}, y = {}, pred = {}'.format(
-            'Original', str(x), y, rf_model.predict(x)))
+        print('{:11s}: X = {}, y = {}, pred = {}'.format(
+            'Original',
+            str(', '.join(['{:6.3f}'.format(xx) for xx in x[0]])),
+            y[0], rf_model.predict(x)[0]))
 
         adv_x = random_forest_attack(rf_model, x, y)
-        print('{:12s}: X = {}, y = {}, pred = {}'.format(
-            'Adversarial', str(adv_x), y, rf_model.predict(adv_x)))
+        print('{:11s}: X = {}, y = {}, pred = {}'.format(
+            'Adversarial',
+            str(', '.join(['{:6.3f}'.format(xx) for xx in adv_x[0]])),
+            y[0], rf_model.predict(adv_x)[0]))
 
 
 if __name__ == '__main__':
