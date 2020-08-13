@@ -79,6 +79,7 @@ class Path():
 def build_paths(x, model, y):
     estimators = model.estimators_  # An array of DecisionTreeClassifier
     paths = []
+    x = np.expand_dims(x, axis=0)
     for i, estimator in enumerate(estimators):
         pred = estimator.predict(x)
         if pred[0] != y[0]:  # Already misclassified, ignore this path
@@ -125,7 +126,7 @@ def random_forest_attack(model, x, y):
             return x_stack[-1].reshape(x.shape)
         while budget > 0:
             # Build path
-            paths = build_paths(x, model, y)
+            paths = build_paths(x_stack[-1], model, y)
 
             # Pick a node
             next_path = find_next_path(paths, x_directions)
@@ -149,6 +150,7 @@ def random_forest_attack(model, x, y):
             if model.predict(np.expand_dims(x_stack[-1], axis=0))[0] != y[0]:
                 return x_stack[-1].reshape(x.shape)
 
+        # NOTE: The code below has never been run!
         # RESTORE
         if len(path_stack) == 0 or len(x_stack) <= 1:
             break
@@ -207,7 +209,8 @@ def main():
     acc = np.count_nonzero(y_pred == Y) / n_samples
     print('Accuracy on train set = {}'.format(acc))
 
-    shuffled_indices = np.random.permutation(list(range(len(X))))[:10]
+    # shuffled_indices = np.random.permutation(list(range(len(X))))[:10]
+    shuffled_indices = np.random.permutation(list(range(len(X))))
     x_shuffle = X[shuffled_indices]
     y_shuffle = Y[shuffled_indices]
     for x, y in zip(x_shuffle, y_shuffle):
