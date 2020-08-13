@@ -1,8 +1,8 @@
 import numpy as np
-from sklearn.datasets import make_classification
-from sklearn.ensemble import RandomForestClassifier
 import pandas as pd
 from scipy.sparse import csr_matrix
+from sklearn.datasets import make_classification
+from sklearn.ensemble import RandomForestClassifier
 
 n_samples = 26
 random_state = 2**14
@@ -207,12 +207,13 @@ def main():
 
     y_pred = rf_model.predict(X)
     acc = np.count_nonzero(y_pred == Y) / n_samples
-    print('Accuracy on train set = {}'.format(acc))
+    print('Accuracy on train set = {:.2f}%'.format(acc*100))
 
     # shuffled_indices = np.random.permutation(list(range(len(X))))[:10]
     shuffled_indices = np.random.permutation(list(range(len(X))))
     x_shuffle = X[shuffled_indices]
     y_shuffle = Y[shuffled_indices]
+    X_adv = []
     for x, y in zip(x_shuffle, y_shuffle):
         # Select a single example
         x = np.expand_dims(x, axis=0)
@@ -223,10 +224,15 @@ def main():
             y[0], rf_model.predict(x)[0]))
 
         adv_x = random_forest_attack(rf_model, x, y)
+        X_adv.append(adv_x.flatten())
         print('{:11s}: X = {}, y = {}, pred = {}'.format(
             'Adversarial',
             str(', '.join(['{:6.3f}'.format(xx) for xx in adv_x[0]])),
             y[0], rf_model.predict(adv_x)[0]))
+
+    adv_predictions = rf_model.predict(np.array(X_adv))
+    acc = np.count_nonzero(adv_predictions == y_shuffle) / n_samples
+    print('Accuracy on adversarial example set = {:.2f}%'.format(acc*100))
 
 
 if __name__ == '__main__':
