@@ -9,7 +9,7 @@ random_state = 2**14
 
 # hyperparameters
 EPSILON = 1e-4  # The minimum change to update a feature.
-MAX_BUDGET = 0.3   # The max. perturbation is allowed.
+MAX_BUDGET = 0.9   # The max. perturbation is allowed.
 MAX_ITERATIONS = 50
 
 
@@ -38,6 +38,7 @@ class Path():
 
     @property
     def last_node(self):
+        """Returns the last unvisited node."""
         idx = self.last_unvisited_index
         if idx == -1:
             return None
@@ -72,11 +73,13 @@ class Path():
         return x
 
     def visit_last_node(self):
+        """Marks the last node as visited."""
         idx = self.last_unvisited_index
         self.visited_list[idx] = True
 
 
 def build_paths(x, model, y):
+    """Returns an array of paths with the correct prediction."""
     estimators = model.estimators_  # An array of DecisionTreeClassifier
     paths = []
     x = np.expand_dims(x, axis=0)
@@ -100,11 +103,12 @@ def build_paths(x, model, y):
 
 
 def find_next_path(paths, x_directions):
+    """Finds the path with minimum cost."""
     min_cost = np.inf
     min_path = None
     for path in paths:
         feature_idx = path.last_node['feature_index']
-        # lowest cost and same direction
+        # lowest cost and same direction (0 means it can go either way)
         if (min_cost > path.cost and
             (x_directions[feature_idx] == 0 or
              path.sign == x_directions[feature_idx])):
@@ -114,7 +118,7 @@ def find_next_path(paths, x_directions):
 
 
 def random_forest_attack(model, x, y):
-    """Generate adversarial example from single input."""
+    """Generates an adversarial example from single input."""
     budget = MAX_BUDGET
     x_stack = [x.squeeze()]  # Expect format [[x1, x2, ...]]
     path_stack = []
@@ -142,7 +146,7 @@ def random_forest_attack(model, x, y):
             # UPDATE 3) Update direction
             x_directions[next_path.last_node['feature_index']] = next_path.sign
             # UPDATE 4) Append path
-            # WARNING: After this call, the cost will compute from the next least node.
+            # WARNING: After this call, the node with min cost will switch to the next least node.
             next_path.visit_last_node()
             path_stack.append(paths)
 
@@ -161,8 +165,8 @@ def random_forest_attack(model, x, y):
         if len(x_stack) < 2:  # The 1st x is the input.
             x_directions = np.zeros(x.shape[1], dtype=np.int64)
         else:
-            x_directions = np.sign(x_stack[-1] - x.squeeze())
-        # RESTORE 3) Restore budget
+            x_directions = np.sign(x_stack[-1] - x_stack[0])
+        # RESTORE 3) Return budget
         change = last_x - x_stack[-1]
         budget += np.abs(np.sum(change))
 
