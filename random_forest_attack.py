@@ -253,20 +253,20 @@ def main():
     # y_shuffle = np.array([1], dtype=np.int64)
 
     X_adv = []
-    for x, y in zip(x_shuffle, y_shuffle):
+    for i, (x, y) in enumerate(zip(x_shuffle, y_shuffle)):
         # Select a single example
         x = np.expand_dims(x, axis=0)
         y = np.expand_dims(y, axis=0).astype(np.int64)
-        print('{:11s}: X = {}, y = {}, pred = {}'.format(
-            'Original',
-            str(', '.join(['{:6.3f}'.format(xx) for xx in x[0]])),
+        print('[{:3d}] {:11s}: X=[{}], y={}, pred={}'.format(
+            i, 'Original',
+            str(','.join(['{:5.2f}'.format(xx) for xx in x[0]])),
             y[0], rf_model.predict(x)[0]))
 
         adv_x = random_forest_attack(rf_model, x, y)
         X_adv.append(adv_x.flatten())
-        print('{:11s}: X = {}, y = {}, pred = {}'.format(
-            'Adversarial',
-            str(', '.join(['{:6.3f}'.format(xx) for xx in adv_x[0]])),
+        print('[{:3d}] {:11s}: X=[{}], y={}, pred={}'.format(
+            i, 'Adversarial',
+            str(','.join(['{:5.2f}'.format(xx) for xx in adv_x[0]])),
             y[0], rf_model.predict(adv_x)[0]))
 
     adv_predictions = rf_model.predict(np.array(X_adv))
@@ -276,6 +276,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+    print('Seed = {}'.format(SEED))
 
     # Testing Path class
     # x = np.array([[0.1, 0.2, 0.3]])
