@@ -8,7 +8,7 @@ from sklearn.ensemble import RandomForestClassifier
 
 # SEED = 2**14
 SEED = random.randint(1, 2**14)
-SAMPLE_SIZE = 200
+SAMPLE_SIZE = 1000
 N_FEATURES = 16
 N_CLASSES = 4
 N_TREES = 8
