@@ -1,9 +1,10 @@
+import random
+
 import numpy as np
 import pandas as pd
 from scipy.sparse import csr_matrix
 from sklearn.datasets import make_classification
 from sklearn.ensemble import RandomForestClassifier
-import random
 
 # SEED = 2**14
 SEED = random.randint(1, 2**14)
@@ -186,8 +187,6 @@ def random_forest_attack(model, x, y):
                 return x_stack[-1].reshape(x.shape)
 
         # RESTORE
-        if len(path_stack) == 0 or len(x_stack) <= 1:
-            break
         # RESTORE 1) Restore x_stack
         last_x = x_stack.pop()
         # RESTORE 2) Restore direction
@@ -200,9 +199,10 @@ def random_forest_attack(model, x, y):
         next_path = find_next_path(path_stack[-1], x_directions)
         while next_path is None:
             # Current branch has no viable path. Let's go up!
-            # RESTORE 1) Restore x_stack and path
-            last_x = x_stack.pop()
             path_stack.pop()
+            # RESTORE
+            # RESTORE 1) Restore x_stack
+            last_x = x_stack.pop()
             # RESTORE 2) Restore direction
             x_directions = compute_direction(x_stack, N_FEATURES)
             # RESTORE 3) Return budget
@@ -220,6 +220,7 @@ def random_forest_attack(model, x, y):
         x_directions[next_path.last_node['feature_index']] = next_path.sign
         # UPDATE 4) Append path
         next_path.visit_last_node()
+        # Updating existing path. The path_stack remains the same.
 
     print('Budget={}. Fail to find adversarial example from [[{}]]. Exit.'.format(
         budget, str(', '.join([str(xx) for xx in x[0]]))))
