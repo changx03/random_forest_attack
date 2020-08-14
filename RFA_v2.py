@@ -4,8 +4,27 @@ from scipy.sparse import csr_matrix
 from sklearn.datasets import make_classification
 from sklearn.ensemble import RandomForestClassifier
 
-n_samples = 26
-random_state = 2**14
+SEED = 2**14
+SAMPLE_SIZE = 100
+N_FEATURES = 4
+N_CLASSES = 3
+N_TREES = 5
+
+# Preparing data
+X, Y = make_classification(n_samples=SAMPLE_SIZE,
+                           n_features=N_FEATURES,
+                           n_classes=N_CLASSES,
+                           n_informative=N_FEATURES-1,
+                           n_redundant=0,
+                           n_repeated=0,
+                           n_clusters_per_class=1,
+                           class_sep=1.0,
+                           random_state=SEED)
+
+# Rescaling to [-1, 1]
+X_max = np.max(X, axis=0)
+X_min = np.min(X, axis=0)
+X = 1 - 2 * (X - X_min)/(X_max - X_min)
 
 # hyperparameters
 EPSILON = 1e-4  # The minimum change to update a feature.
@@ -107,6 +126,8 @@ def find_next_path(paths, x_directions):
     min_cost = np.inf
     min_path = None
     for path in paths:
+        if path.last_node is None:  # No viable node
+            continue
         feature_idx = path.last_node['feature_index']
         # lowest cost and same direction (0 means it can go either way)
         if (min_cost > path.cost and
@@ -195,22 +216,12 @@ def random_forest_attack(model, x, y):
 
 
 def main():
-    # Preparing data
-    X, Y = make_classification(n_samples=n_samples, random_state=random_state,
-                               n_features=3, n_redundant=0, n_informative=3,
-                               n_clusters_per_class=1, class_sep=1.0)
-
-    # Rescaling to [-1, 1]
-    X_max = np.max(X, axis=0)
-    X_min = np.min(X, axis=0)
-    X = 1 - 2 * (X - X_min)/(X_max - X_min)
-
     rf_model = RandomForestClassifier(
-        n_estimators=3, random_state=random_state)
+        n_estimators=N_TREES, random_state=SEED)
     rf_model.fit(X, Y)
 
     y_pred = rf_model.predict(X)
-    acc = np.count_nonzero(y_pred == Y) / n_samples
+    acc = np.count_nonzero(y_pred == Y) / SAMPLE_SIZE
     print('Accuracy on train set = {:.2f}%'.format(acc*100))
 
     # shuffled_indices = np.random.permutation(list(range(len(X))))[:10]
@@ -235,7 +246,7 @@ def main():
             y[0], rf_model.predict(adv_x)[0]))
 
     adv_predictions = rf_model.predict(np.array(X_adv))
-    acc = np.count_nonzero(adv_predictions == y_shuffle) / n_samples
+    acc = np.count_nonzero(adv_predictions == y_shuffle) / SAMPLE_SIZE
     print('Accuracy on adversarial example set = {:.2f}%'.format(acc*100))
 
 
