@@ -6,7 +6,7 @@ from sklearn.ensemble import RandomForestClassifier
 
 SEED = 2**14
 SAMPLE_SIZE = 100
-N_FEATURES = 4
+N_FEATURES = 5
 N_CLASSES = 3
 N_TREES = 5
 
@@ -212,10 +212,12 @@ def random_forest_attack(model, x, y):
         if len(path_stack) == 0:  # Only for the root
             path_stack.append(last_path)
 
+    print('Budget={}. Fail to find adversarial example from {}. Exit.'.format(budget, x))
     return x_stack[-1].reshape(x.shape)
 
 
 def main():
+    # TODO: Failed case: [[ 0.40310563  0.65992472 -0.68839836  0.71044093  0.57571092]]
     rf_model = RandomForestClassifier(
         n_estimators=N_TREES, random_state=SEED)
     rf_model.fit(X, Y)
