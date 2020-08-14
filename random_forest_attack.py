@@ -6,8 +6,7 @@ from scipy.sparse import csr_matrix
 from sklearn.datasets import load_breast_cancer, load_iris, make_classification
 from sklearn.ensemble import RandomForestClassifier
 
-# SEED = 2**14
-SEED = random.randint(1, 2**14)
+SEED = random.randint(0, 2**32)
 # SAMPLE_SIZE = 1000
 # N_FEATURES = 16
 # N_CLASSES = 4
@@ -24,14 +23,14 @@ SEED = random.randint(1, 2**14)
 #                            random_state=SEED)
 
 # Load Iris dataset
-iris = load_iris()
-X = iris.data
-Y = iris.target
+# iris = load_iris()
+# X = iris.data
+# Y = iris.target
 
-# # Load Breast Cancer dataset
-# breast_cancer = load_breast_cancer()
-# X = breast_cancer.data
-# Y = breast_cancer.target
+# Load Breast Cancer dataset
+breast_cancer = load_breast_cancer()
+X = breast_cancer.data
+Y = breast_cancer.target
 
 # Rescaling to [-1, 1]
 X_max = np.max(X, axis=0)
@@ -39,9 +38,10 @@ X_min = np.min(X, axis=0)
 X = 1 - 2 * (X - X_min)/(X_max - X_min)
 
 # hyperparameters
+SHOW_OUTPUTS = True
 N_TREES = 10
 EPSILON = 1e-4  # The minimum change to update a feature.
-MAX_BUDGET = 0.9   # The max. perturbation is allowed.
+MAX_BUDGET = 0.2 * X.shape[1]   # The max. perturbation is allowed.
 MAX_ITERATIONS = 100
 
 
@@ -243,34 +243,38 @@ def main():
         n_estimators=N_TREES, random_state=SEED)
     rf_model.fit(X, Y)
 
-    y_pred = rf_model.predict(X)
-    acc = np.count_nonzero(y_pred == Y) / len(y_pred)
-    print('Accuracy on train set = {:.2f}%'.format(acc*100))
-
-    # Shuffle is unnecessary
-    # shuffled_indices = np.random.permutation(list(range(len(X))))
-    # x_shuffle = X[shuffled_indices]
-    # y_shuffle = Y[shuffled_indices]
-
-    x_shuffle = X
-    y_shuffle = Y
+    shuffled_indices = np.random.permutation(list(range(len(X))))
+    last_index = len(shuffled_indices) if len(shuffled_indices) < 100 else 100
+    shuffled_indices = shuffled_indices[:last_index]
+    x_shuffle = X[shuffled_indices]
+    y_shuffle = Y[shuffled_indices]
 
     X_adv = []
     for i, (x, y) in enumerate(zip(x_shuffle, y_shuffle)):
         # Select a single example
         x = np.expand_dims(x, axis=0)
         y = np.expand_dims(y, axis=0).astype(np.int64)
-        print('[{:3d}] {:11s}: X=[{}], y={}, pred={}'.format(
-            i, 'Original',
-            str(','.join(['{:5.2f}'.format(xx) for xx in x[0]])),
-            y[0], rf_model.predict(x)[0]))
+        if SHOW_OUTPUTS:
+            print('[{:3d}] {:11s}: X=[{}], y={}, pred={}'.format(
+                i, 'Original',
+                str(','.join(['{:5.2f}'.format(xx) for xx in x[0]])),
+                y[0], rf_model.predict(x)[0]))
 
         adv_x = random_forest_attack(rf_model, x, y)
         X_adv.append(adv_x.flatten())
-        print('[{:3d}] {:11s}: X=[{}], y={}, pred={}'.format(
-            i, 'Adversarial',
-            str(','.join(['{:5.2f}'.format(xx) for xx in adv_x[0]])),
-            y[0], rf_model.predict(adv_x)[0]))
+        if SHOW_OUTPUTS:
+            print('[{:3d}] {:11s}: X=[{}], y={}, pred={}'.format(
+                i, 'Adversarial',
+                str(','.join(['{:5.2f}'.format(xx) for xx in adv_x[0]])),
+                y[0], rf_model.predict(adv_x)[0]))
+
+    y_pred = rf_model.predict(X)
+    acc = np.count_nonzero(y_pred == Y) / len(y_pred)
+    print('Accuracy on train set = {:.2f}%'.format(acc*100))
+
+    y_pred = rf_model.predict(x_shuffle)
+    acc = np.count_nonzero(y_pred == y_shuffle) / len(y_shuffle)
+    print('Accuracy on test set = {:.2f}%'.format(acc*100))
 
     adv_predictions = rf_model.predict(np.array(X_adv))
     acc = np.count_nonzero(adv_predictions == y_shuffle) / len(y_shuffle)
@@ -292,6 +296,6 @@ if __name__ == '__main__':
     #     print('cost', path.cost)
     #     print('updated_value', path.updated_value)
     #     path.visit_last_node()
-    
-    main()
+
     print('Seed = {}'.format(SEED))
+    main()
