@@ -3,26 +3,35 @@ import random
 import numpy as np
 import pandas as pd
 from scipy.sparse import csr_matrix
-from sklearn.datasets import make_classification
+from sklearn.datasets import load_breast_cancer, load_iris, make_classification
 from sklearn.ensemble import RandomForestClassifier
 
 # SEED = 2**14
 SEED = random.randint(1, 2**14)
-SAMPLE_SIZE = 1000
-N_FEATURES = 16
-N_CLASSES = 4
-N_TREES = 8
+# SAMPLE_SIZE = 1000
+# N_FEATURES = 16
+# N_CLASSES = 4
 
-# Preparing data
-X, Y = make_classification(n_samples=SAMPLE_SIZE,
-                           n_features=N_FEATURES,
-                           n_classes=N_CLASSES,
-                           n_informative=N_FEATURES-1,
-                           n_redundant=0,
-                           n_repeated=0,
-                           n_clusters_per_class=1,
-                           class_sep=1.0,
-                           random_state=SEED)
+# # Preparing data
+# X, Y = make_classification(n_samples=SAMPLE_SIZE,
+#                            n_features=N_FEATURES,
+#                            n_classes=N_CLASSES,
+#                            n_informative=N_FEATURES-1,
+#                            n_redundant=0,
+#                            n_repeated=0,
+#                            n_clusters_per_class=1,
+#                            class_sep=1.0,
+#                            random_state=SEED)
+
+# Load Iris dataset
+iris = load_iris()
+X = iris.data
+Y = iris.target
+
+# # Load Breast Cancer dataset
+# breast_cancer = load_breast_cancer()
+# X = breast_cancer.data
+# Y = breast_cancer.target
 
 # Rescaling to [-1, 1]
 X_max = np.max(X, axis=0)
@@ -30,6 +39,7 @@ X_min = np.min(X, axis=0)
 X = 1 - 2 * (X - X_min)/(X_max - X_min)
 
 # hyperparameters
+N_TREES = 10
 EPSILON = 1e-4  # The minimum change to update a feature.
 MAX_BUDGET = 0.9   # The max. perturbation is allowed.
 MAX_ITERATIONS = 100
@@ -151,6 +161,7 @@ def compute_direction(x_stack, n_features):
 
 def random_forest_attack(model, x, y):
     """Generates an adversarial example from single input."""
+    n_features = x.shape[1]
     budget = MAX_BUDGET
     x_stack = [x.squeeze()]  # Expect format [[x1, x2, ...]]
     path_stack = []
@@ -190,7 +201,7 @@ def random_forest_attack(model, x, y):
         # RESTORE 1) Restore x_stack
         last_x = x_stack.pop()
         # RESTORE 2) Restore direction
-        x_directions = compute_direction(x_stack, N_FEATURES)
+        x_directions = compute_direction(x_stack, n_features)
         # RESTORE 3) Return budget
         change = last_x - x_stack[-1]
         budget += np.abs(np.sum(change))
@@ -204,7 +215,7 @@ def random_forest_attack(model, x, y):
             # RESTORE 1) Restore x_stack
             last_x = x_stack.pop()
             # RESTORE 2) Restore direction
-            x_directions = compute_direction(x_stack, N_FEATURES)
+            x_directions = compute_direction(x_stack, n_features)
             # RESTORE 3) Return budget
             change = last_x - x_stack[-1]
             budget += np.abs(np.sum(change))
@@ -223,7 +234,7 @@ def random_forest_attack(model, x, y):
         # Updating existing path. The path_stack remains the same.
 
     print('Budget={}. Fail to find adversarial example from [[{}]]. Exit.'.format(
-        budget, str(', '.join([str(xx) for xx in x[0]]))))
+        budget, str(','.join(['{:5.2f}'.format(xx) for xx in x[0]]))))
     return x_stack[-1].reshape(x.shape)
 
 
@@ -236,21 +247,13 @@ def main():
     acc = np.count_nonzero(y_pred == Y) / len(y_pred)
     print('Accuracy on train set = {:.2f}%'.format(acc*100))
 
-    shuffled_indices = np.random.permutation(list(range(len(X))))
-    x_shuffle = X[shuffled_indices]
-    y_shuffle = Y[shuffled_indices]
+    # Shuffle is unnecessary
+    # shuffled_indices = np.random.permutation(list(range(len(X))))
+    # x_shuffle = X[shuffled_indices]
+    # y_shuffle = Y[shuffled_indices]
 
-    # Note:
-    # Failed Case
-    # SEED = 2**14
-    # SAMPLE_SIZE = 100
-    # N_FEATURES = 5
-    # N_CLASSES = 3
-    # N_TREES = 5
-    # x_shuffle = np.array(
-    #     [[-0.232,  0.282, -0.697, -0.521, -0.397]],
-    #     dtype=np.float32)
-    # y_shuffle = np.array([1], dtype=np.int64)
+    x_shuffle = X
+    y_shuffle = Y
 
     X_adv = []
     for i, (x, y) in enumerate(zip(x_shuffle, y_shuffle)):
@@ -275,9 +278,6 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
-    print('Seed = {}'.format(SEED))
-
     # Testing Path class
     # x = np.array([[0.1, 0.2, 0.3]])
     # y = np.array([1])
@@ -292,3 +292,6 @@ if __name__ == '__main__':
     #     print('cost', path.cost)
     #     print('updated_value', path.updated_value)
     #     path.visit_last_node()
+    
+    main()
+    print('Seed = {}'.format(SEED))
