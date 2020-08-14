@@ -3,12 +3,14 @@ import pandas as pd
 from scipy.sparse import csr_matrix
 from sklearn.datasets import make_classification
 from sklearn.ensemble import RandomForestClassifier
+import random
 
-SEED = 2**14
-SAMPLE_SIZE = 100
-N_FEATURES = 5
-N_CLASSES = 3
-N_TREES = 5
+# SEED = 2**14
+SEED = random.randint(1, 2**14)
+SAMPLE_SIZE = 200
+N_FEATURES = 16
+N_CLASSES = 4
+N_TREES = 8
 
 # Preparing data
 X, Y = make_classification(n_samples=SAMPLE_SIZE,
@@ -29,7 +31,7 @@ X = 1 - 2 * (X - X_min)/(X_max - X_min)
 # hyperparameters
 EPSILON = 1e-4  # The minimum change to update a feature.
 MAX_BUDGET = 0.9   # The max. perturbation is allowed.
-MAX_ITERATIONS = 50
+MAX_ITERATIONS = 100
 
 
 class Path():
@@ -138,6 +140,14 @@ def find_next_path(paths, x_directions):
     return min_path
 
 
+def compute_direction(x_stack, n_features):
+    """Compute the direction of the updates on x"""
+    x_directions = np.zeros(n_features, dtype=np.int64)
+    if len(x_stack) >= 2:  # The 1st x is the input.
+        x_directions = np.sign(x_stack[-1] - x_stack[0]).astype(np.int64)
+    return x_directions
+
+
 def random_forest_attack(model, x, y):
     """Generates an adversarial example from single input."""
     budget = MAX_BUDGET
@@ -175,29 +185,30 @@ def random_forest_attack(model, x, y):
             if model.predict(np.expand_dims(x_stack[-1], axis=0))[0] != y[0]:
                 return x_stack[-1].reshape(x.shape)
 
-        # NOTE: The code below has never been run!
         # RESTORE
         if len(path_stack) == 0 or len(x_stack) <= 1:
             break
-        # RESTORE 1) Restore x_stack and path_stack
-        last_path = path_stack.pop()
+        # RESTORE 1) Restore x_stack
         last_x = x_stack.pop()
         # RESTORE 2) Restore direction
-        if len(x_stack) < 2:  # The 1st x is the input.
-            x_directions = np.zeros(x.shape[1], dtype=np.int64)
-        else:
-            x_directions = np.sign(x_stack[-1] - x_stack[0])
+        x_directions = compute_direction(x_stack, N_FEATURES)
         # RESTORE 3) Return budget
         change = last_x - x_stack[-1]
         budget += np.abs(np.sum(change))
 
         # Pick a node from previous path
-        if len(path_stack) == 0:
-            next_path = find_next_path(last_path, x_directions)
-        else:
+        next_path = find_next_path(path_stack[-1], x_directions)
+        while next_path is None:
+            # Current branch has no viable path. Let's go up!
+            # RESTORE 1) Restore x_stack and path
+            last_x = x_stack.pop()
+            path_stack.pop()
+            # RESTORE 2) Restore direction
+            x_directions = compute_direction(x_stack, N_FEATURES)
+            # RESTORE 3) Return budget
+            change = last_x - x_stack[-1]
+            budget += np.abs(np.sum(change))
             next_path = find_next_path(path_stack[-1], x_directions)
-        if next_path is None:
-            break
 
         # UPDATE
         # UPDATE 1) Append x
@@ -209,27 +220,37 @@ def random_forest_attack(model, x, y):
         x_directions[next_path.last_node['feature_index']] = next_path.sign
         # UPDATE 4) Append path
         next_path.visit_last_node()
-        if len(path_stack) == 0:  # Only for the root
-            path_stack.append(last_path)
 
-    print('Budget={}. Fail to find adversarial example from {}. Exit.'.format(budget, x))
+    print('Budget={}. Fail to find adversarial example from [[{}]]. Exit.'.format(
+        budget, str(', '.join([str(xx) for xx in x[0]]))))
     return x_stack[-1].reshape(x.shape)
 
 
 def main():
-    # TODO: Failed case: [[ 0.40310563  0.65992472 -0.68839836  0.71044093  0.57571092]]
     rf_model = RandomForestClassifier(
         n_estimators=N_TREES, random_state=SEED)
     rf_model.fit(X, Y)
 
     y_pred = rf_model.predict(X)
-    acc = np.count_nonzero(y_pred == Y) / SAMPLE_SIZE
+    acc = np.count_nonzero(y_pred == Y) / len(y_pred)
     print('Accuracy on train set = {:.2f}%'.format(acc*100))
 
-    # shuffled_indices = np.random.permutation(list(range(len(X))))[:10]
     shuffled_indices = np.random.permutation(list(range(len(X))))
     x_shuffle = X[shuffled_indices]
     y_shuffle = Y[shuffled_indices]
+
+    # Note:
+    # Failed Case
+    # SEED = 2**14
+    # SAMPLE_SIZE = 100
+    # N_FEATURES = 5
+    # N_CLASSES = 3
+    # N_TREES = 5
+    # x_shuffle = np.array(
+    #     [[-0.232,  0.282, -0.697, -0.521, -0.397]],
+    #     dtype=np.float32)
+    # y_shuffle = np.array([1], dtype=np.int64)
+
     X_adv = []
     for x, y in zip(x_shuffle, y_shuffle):
         # Select a single example
@@ -248,7 +269,7 @@ def main():
             y[0], rf_model.predict(adv_x)[0]))
 
     adv_predictions = rf_model.predict(np.array(X_adv))
-    acc = np.count_nonzero(adv_predictions == y_shuffle) / SAMPLE_SIZE
+    acc = np.count_nonzero(adv_predictions == y_shuffle) / len(y_shuffle)
     print('Accuracy on adversarial example set = {:.2f}%'.format(acc*100))
 
 
