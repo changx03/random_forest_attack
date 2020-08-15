@@ -73,7 +73,7 @@ for i in range(MAX_ITERATIONS):
     if prediction(x_stack.peek) != y:
         return x_stack.peek
 
-    find a viable path with least cost from the last node in paths_stack
+    find path from the last node in paths_stack
     while path is None or budget < 0:
         if x_stack is not at root:
             last_x = x_stack.pop
@@ -83,7 +83,7 @@ for i in range(MAX_ITERATIONS):
 
         restore directions
         refund budget
-        find a viable path with least cost from the last node in paths_stack
+        find path from the last node in paths_stack
 
     compute next_x given the selected path
     x_stack.push(next_x)
