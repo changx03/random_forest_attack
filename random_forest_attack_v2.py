@@ -13,8 +13,8 @@ SEED = random.randint(0, 2**32)
 
 # Load synthetic data
 # SAMPLE_SIZE = 400
-# N_FEATURES = 5
-# N_CLASSES = 4
+# N_FEATURES = 32
+# N_CLASSES = 10
 # X, Y = make_classification(n_samples=SAMPLE_SIZE,
 #                            n_features=N_FEATURES,
 #                            n_classes=N_CLASSES,
@@ -178,6 +178,10 @@ def random_forest_attack(model, x, y):
 
         # Pick a node
         least_cost_path = find_next_path(paths_stack[-1], x_directions)
+        if (least_cost_path is None and
+                len(paths_stack) == 1 and
+                len(x_stack) == 1): # No more viable node at the root
+            break
 
         while least_cost_path is None or budget < 0:
             # Current branch has no viable path. Go up!

@@ -74,6 +74,9 @@ for i in range(MAX_ITERATIONS):
         return x_stack.peek
 
     find path from the last node in paths_stack
+    if no node is available at the root:
+        break
+
     while path is None or budget < 0:
         if x_stack is not at root:
             last_x = x_stack.pop
