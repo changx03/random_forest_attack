@@ -1,52 +1,95 @@
 # Algorithm for Random Forest Attack
 
-1. Initialize maximum budget (the max. perturbation is allowed.), the decision trees, and the input sample which we want to mutate.
-1. Building nodes by traversing each decision tree (one tree one path)
-1. Finding the node with minimum cost to switch the decision (Using the last node. _Note: Can be any node in the graph. Top nodes are also viable choices._)
-1. Updating budget and input. Checking the new prediction. If the prediction is switched to the desired class, returns the updated input and stop. Else, builds nodes with updated input.
+```python
+initialize x_stack, push x
+initialize directions, default to zeros
+initialize paths_stack
 
-## Problem
+for i in range(MAX_ITERATIONS):
+  if prediction(x_stack.peek()) != y:
+    return x_stack.peek()
 
-Exist the current branch when there is not enough budget to spend.
+  while budget > 0:
+    find paths given x_stack.peek()
+    find a viable node with least cost using the paths
+    if node is None:
+      break
 
-## Pseudo code
+    compute next_x given the selected node
+    x_stack.push(next_x)
+    reduce budget
+    update directions
+    set the node as visited
+    paths_stack.push(paths)
+
+    if prediction(x_stack.peek()) != y:
+      return x_stack.peek()
+
+  x_stack.pop()
+  restore directions
+  refund budget
+
+  find a viable node with least cost using paths_stack.peek()
+  while node is None:
+    paths_stack.pop()
+    x_stack.pop()
+    restore directions
+    refund budget
+    find a viable node with least cost using paths_stack.peek()
+
+  compute next_x given the selected node
+  x_stack.push(next_x)
+  reduce budget
+  update directions
+  set the node as visited
+```
+
+## Parameters
 
 - Inputs:
-  - k: number of Decision Trees in a RF
-  - X: (1\*m Array) Input example
+  - k: Number of Decision Trees in a RF
+  - m: Number of input features
+  - x: (1\*m Array) An input example
   - y: (int) Output label
-  - estimators: (Array) An array with k Decision Trees
-  - budget: (float) Maximum perturbation
+  - model: A trained Random Forest model which contains k Decision Trees
+  - budget: (float) Maximum perturbation (Default=0.2\*m)
+  - MAX_ITERATIONS: The maximum number of iterations (Default=100)
 - Outputs:
   - X_adv: (1\*m Array) Adversarial example
 - Parameters:
-  - j: (int) number of updates
-  - paths: (Array) An array with k Path instances
-  - update_values: (Array) An array with j elements. It keeps the update values (Can be positive and negative)
-  - update_feature_indices: (Array) An array with j elements. It keeps the feature index
+  - x_stack: LIFO stack. Keeps tracking the updates of x
+  - directions: Which direction can x updates to (-1: Negative only, 0: Both, 1: Positive only)
+  - paths_stack: LIFO stack. Keeps tracking the selected paths with given x
+
+## Pseudocode Version 2
 
 ```python
-update_feature_indices = [0] # Root index doesn't matter, because the update value is 0.
-update_values = [0]
+initialize x_stack, push x
+initialize directions, default to zeros
+compute the initial paths
+initialize paths_stack, push initial paths
 
-paths = []
-for estimator in estimators:
-    path = build_path(x_stack[-1], estimator)
-    paths.append(path)
+for i in range(MAX_ITERATIONS):
+    if prediction(x_stack.peek) != y:
+        return x_stack.peek
 
-# Find optimal update
-path_index, feature_index, update_value = find_optimal_update(
-    paths,
-    update_feature_indices,
-    update_values)
+    find a viable path with least cost from the last node in paths_stack
+    while path is None or budget < 0:
+        if x_stack is not at root:
+            last_x = x_stack.pop
+            paths_stack.pop
+        else:
+            last_x = x
 
-if (budget - abs(update_value)) <= 0: # Minimum change out of budget, switch node
-    paths[path_index].cost = infinity # No longer use this path
-    continue
-budget -= abs(update_value)
-update_feature_indices.append(feature_index)
-update_values.append(update_value)
-x_next = update_X(X, update_feature_indices, update_values)
-if predict(x_next) != y:
-    return x_next # Found x_adv. Done.
+        restore directions
+        refund budget
+        find a viable path with least cost from the last node in paths_stack
+
+    compute next_x given the selected path
+    x_stack.push(next_x)
+    reduce budget
+    update directions
+    set the node in the selected path as visited
+    compute new paths
+    paths_stack.push(paths)
 ```
