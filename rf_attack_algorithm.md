@@ -47,13 +47,14 @@ for i in range(MAX_ITERATIONS):
 ## Parameters
 
 - Inputs:
+
   - k: Number of Decision Trees in a RF
   - m: Number of input features
   - x: (1\*m Array) An input example
   - y: (int) Output label
   - model: A trained Random Forest model which contains k Decision Trees
   - budget: (float) Maximum perturbation (Default=0.2\*m)
-  - MAX_ITERATIONS: The maximum number of iterations (Default=100)
+
 - Outputs:
   - X_adv: (1\*m Array) Adversarial example
 - Parameters:
@@ -66,19 +67,19 @@ for i in range(MAX_ITERATIONS):
 ```python
 initialize x_stack, push x
 initialize directions, default to zeros
-compute the initial paths
+find initial paths
 initialize paths_stack, push initial paths
 
-for i in range(MAX_ITERATIONS):
-    if prediction(x_stack.peek) != y:
+while True:
+    if prediction(x_stack.peek) is not y:
         return x_stack.peek
 
-    find path from the last node in paths_stack
-    if no node is available at the root:
+    find a path in paths_stack.peek
+    if path is None and length(paths_stack) == 1:
         break
 
     while path is None or budget < 0:
-        if x_stack is not at root:
+        if length(paths_stack) > 1:
             last_x = x_stack.pop
             paths_stack.pop
         else:
@@ -86,13 +87,18 @@ for i in range(MAX_ITERATIONS):
 
         restore directions
         refund budget
-        find path from the last node in paths_stack
+        find a path in paths_stack.peek
 
-    compute next_x given the selected path
+        if path is None:
+            return x_stack.peek
+
+    compute next_x based on the selected path
     x_stack.push(next_x)
     reduce budget
     update directions
     set the node in the selected path as visited
-    compute new paths
+    compute new paths based on next_x
     paths_stack.push(paths)
+
+return x_stack.peek
 ```
