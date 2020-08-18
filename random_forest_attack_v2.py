@@ -4,7 +4,7 @@ import random
 
 import numpy as np
 import pandas as pd
-from scipy.sparse import csr_matrix
+# from scipy.sparse import csr_matrix
 from sklearn.datasets import load_breast_cancer, load_iris, make_classification
 from sklearn.ensemble import RandomForestClassifier
 

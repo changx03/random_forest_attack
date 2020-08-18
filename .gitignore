@@ -55,3 +55,4 @@ geckodriver.log
 # output files
 Source.gv
 Source.gv.pdf
+mnist.p
