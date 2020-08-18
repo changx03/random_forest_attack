@@ -1,21 +1,19 @@
-"""Random Forest Attack Version 0.2
+"""Random Forest Attack Version 0.1
 """
 import random
 
 import numpy as np
 import pandas as pd
-# from scipy.sparse import csr_matrix
+from scipy.sparse import csr_matrix
 from sklearn.datasets import load_breast_cancer, load_iris, make_classification
 from sklearn.ensemble import RandomForestClassifier
 
 SEED = random.randint(0, 2**32)
-
-# Preparing data
-
-# Load synthetic data
-# SAMPLE_SIZE = 400
+# SAMPLE_SIZE = 1000
 # N_FEATURES = 16
-# N_CLASSES = 10
+# N_CLASSES = 4
+
+# # Preparing data
 # X, Y = make_classification(n_samples=SAMPLE_SIZE,
 #                            n_features=N_FEATURES,
 #                            n_classes=N_CLASSES,
@@ -27,14 +25,14 @@ SEED = random.randint(0, 2**32)
 #                            random_state=SEED)
 
 # Load Iris dataset
-iris = load_iris()
-X = iris.data
-Y = iris.target
+# iris = load_iris()
+# X = iris.data
+# Y = iris.target
 
 # Load Breast Cancer dataset
-# breast_cancer = load_breast_cancer()
-# X = breast_cancer.data
-# Y = breast_cancer.target
+breast_cancer = load_breast_cancer()
+X = breast_cancer.data
+Y = breast_cancer.target
 
 # Rescaling to [-1, 1]
 X_max = np.max(X, axis=0)
@@ -42,9 +40,11 @@ X_min = np.min(X, axis=0)
 X = 1 - 2 * (X - X_min)/(X_max - X_min)
 
 # hyperparameters
-N_TREES = 16
+SHOW_OUTPUTS = True
+N_TREES = 10
 EPSILON = 1e-4  # The minimum change to update a feature.
-MAX_BUDGET = 0.01 * X.shape[1]   # The max. perturbation is allowed.
+MAX_BUDGET = 0.2 * X.shape[1]   # The max. perturbation is allowed.
+MAX_ITERATIONS = 100
 
 
 class Path():
@@ -163,62 +163,80 @@ def compute_direction(x_stack, n_features):
 
 def random_forest_attack(model, x, y):
     """Generates an adversarial example from single input."""
-    m = x.shape[1]  # Number of input features
+    n_features = x.shape[1]
     budget = MAX_BUDGET
-    x_stack = [x.squeeze()]  # Expect format [[x0, x1, ...]]
-    x_directions = np.zeros(m, dtype=np.int64)
-    paths = build_paths(x_stack[0], model, y)
-    paths_stack = [paths]  # Expect format [[path0, path1, ...]]
+    x_stack = [x.squeeze()]  # Expect format [[x1, x2, ...]]
+    path_stack = []
+    x_directions = np.zeros(n_features, dtype=np.int64)
 
-    while True:
+    for i in range(MAX_ITERATIONS):
         # Predict latest updated x
         if model.predict(np.expand_dims(x_stack[-1], axis=0))[0] != y[0]:
             return x_stack[-1].reshape(x.shape)
+        while budget > 0:
+            # Build path
+            paths = build_paths(x_stack[-1], model, y)
 
-        # Pick a node
-        least_cost_path = find_next_path(paths_stack[-1], x_directions)
-        if (least_cost_path is None and
-                len(paths_stack) == 1 and
-                len(x_stack) == 1):  # No more viable node at the root
-            break
+            # Pick a node
+            next_path = find_next_path(paths, x_directions)
+            if next_path is None:
+                break
 
-        while least_cost_path is None or budget < 0:
-            # Current branch has no viable path. Go up!
-            # Don't remove the root
-            if len(paths_stack) > 1 and len(x_stack) > 1:
-                paths_stack.pop()
-                last_x = x_stack.pop()
-            else:
-                last_x = x_stack[0]
+            # UPDATE: Order matters!
+            # UPDATE 1) Append x
+            next_x = next_path.get_next_x()
+            x_stack.append(next_x)
+            # UPDATE 2) Reduce budget
+            budget -= next_path.cost
+            # UPDATE 3) Update direction
+            x_directions[next_path.last_node['feature_index']] = next_path.sign
+            # UPDATE 4) Append path
+            # WARNING: After this call, the node with min cost will switch to the next least node.
+            next_path.visit_last_node()
+            path_stack.append(paths)
 
-            # RESTORE: direction
-            x_directions = compute_direction(x_stack, m)
-            # RESTORE: budget
-            change = last_x - x_stack[-1]
-            budget += np.abs(np.sum(change))
-            current_paths = paths_stack[-1]
-            least_cost_path = find_next_path(current_paths, x_directions)
-
-            if least_cost_path is None:
-                # No viable perturbation within the budget. Exit
+            # Predict latest updated x
+            if model.predict(np.expand_dims(x_stack[-1], axis=0))[0] != y[0]:
                 return x_stack[-1].reshape(x.shape)
 
-        # UPDATE: Order matters!
+        # RESTORE
+        # RESTORE 1) Restore x_stack
+        last_x = x_stack.pop()
+        # RESTORE 2) Restore direction
+        x_directions = compute_direction(x_stack, n_features)
+        # RESTORE 3) Return budget
+        change = last_x - x_stack[-1]
+        budget += np.abs(np.sum(change))
+
+        # Pick a node from previous path
+        next_path = find_next_path(path_stack[-1], x_directions)
+        while next_path is None:
+            # Current branch has no viable path. Let's go up!
+            path_stack.pop()
+            # RESTORE
+            # RESTORE 1) Restore x_stack
+            last_x = x_stack.pop()
+            # RESTORE 2) Restore direction
+            x_directions = compute_direction(x_stack, n_features)
+            # RESTORE 3) Return budget
+            change = last_x - x_stack[-1]
+            budget += np.abs(np.sum(change))
+            next_path = find_next_path(path_stack[-1], x_directions)
+
+        # UPDATE
         # UPDATE 1) Append x
-        next_x = least_cost_path.get_next_x()
+        next_x = next_path.get_next_x()
         x_stack.append(next_x)
         # UPDATE 2) Reduce budget
-        budget -= least_cost_path.cost
+        budget -= next_path.cost
         # UPDATE 3) Update direction
-        feature_index = least_cost_path.last_node['feature_index']
-        x_directions[feature_index] = least_cost_path.sign
+        x_directions[next_path.last_node['feature_index']] = next_path.sign
         # UPDATE 4) Append path
-        # WARNING: After this call, the node with min cost will switch to the next least node.
-        least_cost_path.visit_last_node()
-        next_paths = build_paths(next_x, model, y)
-        paths_stack.append(next_paths)
+        next_path.visit_last_node()
+        # Updating existing path. The path_stack remains the same.
 
-    # If the code reaches this line, it means it cannot find viable adversarial example.
+    print('Budget={}. Fail to find adversarial example from [[{}]]. Exit.'.format(
+        budget, str(','.join(['{:5.2f}'.format(xx) for xx in x[0]]))))
     return x_stack[-1].reshape(x.shape)
 
 
@@ -238,17 +256,19 @@ def main():
         # Select a single example
         x = np.expand_dims(x, axis=0)
         y = np.expand_dims(y, axis=0).astype(np.int64)
-        print('[{:3d}] {:11s}: X=[{}], y={}, pred={}'.format(
-            i, 'Original',
-            str(','.join(['{:5.2f}'.format(xx) for xx in x[0]])),
-            y[0], rf_model.predict(x)[0]))
+        if SHOW_OUTPUTS:
+            print('[{:3d}] {:11s}: X=[{}], y={}, pred={}'.format(
+                i, 'Original',
+                str(','.join(['{:5.2f}'.format(xx) for xx in x[0]])),
+                y[0], rf_model.predict(x)[0]))
 
         adv_x = random_forest_attack(rf_model, x, y)
         X_adv.append(adv_x.flatten())
-        print('[{:3d}] {:11s}: X=[{}], y={}, pred={}'.format(
-            i, 'Adversarial',
-            str(','.join(['{:5.2f}'.format(xx) for xx in adv_x[0]])),
-            y[0], rf_model.predict(adv_x)[0]))
+        if SHOW_OUTPUTS:
+            print('[{:3d}] {:11s}: X=[{}], y={}, pred={}'.format(
+                i, 'Adversarial',
+                str(','.join(['{:5.2f}'.format(xx) for xx in adv_x[0]])),
+                y[0], rf_model.predict(adv_x)[0]))
 
     y_pred = rf_model.predict(X)
     acc = np.count_nonzero(y_pred == Y) / len(y_pred)
