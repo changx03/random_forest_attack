@@ -366,48 +366,6 @@ code {
     });
   </script>
 <h1 id="algorithm-for-random-forest-attack">Algorithm for Random Forest Attack</h1>
-<pre class="hljs"><code><div>initialize x_stack, push x
-initialize directions, default to zeros
-initialize paths_stack
-
-<span class="hljs-keyword">for</span> i <span class="hljs-keyword">in</span> range(MAX_ITERATIONS):
-  <span class="hljs-keyword">if</span> prediction(x_stack.peek()) != y:
-    <span class="hljs-keyword">return</span> x_stack.peek()
-
-  <span class="hljs-keyword">while</span> budget &gt; <span class="hljs-number">0</span>:
-    find paths given x_stack.peek()
-    find a viable node <span class="hljs-keyword">with</span> least cost using the paths
-    <span class="hljs-keyword">if</span> node <span class="hljs-keyword">is</span> <span class="hljs-literal">None</span>:
-      <span class="hljs-keyword">break</span>
-
-    compute next_x given the selected node
-    x_stack.push(next_x)
-    reduce budget
-    update directions
-    set the node <span class="hljs-keyword">as</span> visited
-    paths_stack.push(paths)
-
-    <span class="hljs-keyword">if</span> prediction(x_stack.peek()) != y:
-      <span class="hljs-keyword">return</span> x_stack.peek()
-
-  x_stack.pop()
-  restore directions
-  refund budget
-
-  find a viable node <span class="hljs-keyword">with</span> least cost using paths_stack.peek()
-  <span class="hljs-keyword">while</span> node <span class="hljs-keyword">is</span> <span class="hljs-literal">None</span>:
-    paths_stack.pop()
-    x_stack.pop()
-    restore directions
-    refund budget
-    find a viable node <span class="hljs-keyword">with</span> least cost using paths_stack.peek()
-
-  compute next_x given the selected node
-  x_stack.push(next_x)
-  reduce budget
-  update directions
-  set the node <span class="hljs-keyword">as</span> visited
-</div></code></pre>
 <h2 id="parameters">Parameters</h2>
 <ul>
 <li>
@@ -415,10 +373,10 @@ initialize paths_stack
 <ul>
 <li>k: Number of Decision Trees in a RF</li>
 <li>m: Number of input features</li>
-<li>x: (1*m Array) An input example</li>
-<li>y: (int) Output label</li>
-<li>model: A trained Random Forest model which contains k Decision Trees</li>
-<li>budget: (float) Maximum perturbation (Default=0.2*m)</li>
+<li>x: A single data point</li>
+<li>y: The output label for the given input</li>
+<li>model: A trained Random Forest classifier which contains k Decision Trees</li>
+<li>budget: Maximum perturbation (Default=0.1*m)</li>
 </ul>
 </li>
 <li>
@@ -431,12 +389,12 @@ initialize paths_stack
 <p>Parameters:</p>
 <ul>
 <li>x_stack: LIFO stack. Keeps tracking the updates of x</li>
-<li>directions: Which direction can x updates to (-1: Negative only, 0: Both, 1: Positive only)</li>
+<li>directions: The directions of features of x that is allowed to move (-1: Negative only, 0: Both, 1: Positive only)</li>
 <li>paths_stack: LIFO stack. Keeps tracking the selected paths with given x</li>
 </ul>
 </li>
 </ul>
-<h2 id="pseudocode-version-2">Pseudocode Version 2</h2>
+<h2 id="pseudocode">Pseudocode</h2>
 <pre class="hljs"><code><div>initialize x_stack, push x
 initialize directions, default to zeros
 find initial paths
