@@ -27,14 +27,14 @@ SEED = random.randint(0, 2**32)
 #                            random_state=SEED)
 
 # Load Iris dataset
-iris = load_iris()
-X = iris.data
-Y = iris.target
+# iris = load_iris()
+# X = iris.data
+# Y = iris.target
 
 # Load Breast Cancer dataset
-# breast_cancer = load_breast_cancer()
-# X = breast_cancer.data
-# Y = breast_cancer.target
+breast_cancer = load_breast_cancer()
+X = breast_cancer.data
+Y = breast_cancer.target
 
 # Rescaling to [-1, 1]
 X_max = np.max(X, axis=0)
@@ -44,7 +44,7 @@ X = 1 - 2 * (X - X_min)/(X_max - X_min)
 # hyperparameters
 N_TREES = 16
 EPSILON = 1e-4  # The minimum change to update a feature.
-MAX_BUDGET = 0.01 * X.shape[1]   # The max. perturbation is allowed.
+MAX_BUDGET = 0.1 * X.shape[1]   # The max. perturbation is allowed.
 
 
 class Path():
