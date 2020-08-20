@@ -11,23 +11,23 @@ class Node():
         self.threshold = threshold
         self.is_visited = False
 
-    def sign(self, x):
+    def get_sign(self, x):
         """Returns the direction of the cost"""
         return 1 if x[self.feature_index] <= self.threshold else -1
 
-    def cost(self, x, directions, epsilon):
+    def get_cost(self, x, directions, epsilon):
         """Returns the cost of switching this branch"""
         if self.is_visited:
             return np.inf
         if (directions[self.feature_index] != 0 and
-                self.sign(x) != directions[self.feature_index]):
+                self.get_sign(x) != directions[self.feature_index]):
             return np.inf
         return np.abs(x[self.feature_index] - self.threshold) + epsilon
 
     def get_next_x(self, x, epsilon):
         """Returns the updated x"""
         next_x = np.copy(x)
-        next_x[self.feature_index] += self.sign(x) * (
+        next_x[self.feature_index] += self.get_sign(x) * (
             np.abs(x[self.feature_index] - self.threshold) + epsilon)
         return next_x
 
@@ -72,8 +72,8 @@ def pick_least_leaf(paths, x,  directions, epsilon):
         if viable_node is None:
             continue
         direction = directions[viable_node.feature_index]
-        cost = viable_node.cost(x, directions, epsilon)
-        if ((direction == 0 or direction == viable_node.sign(x)) and
+        cost = viable_node.get_cost(x, directions, epsilon)
+        if ((direction == 0 or direction == viable_node.get_sign(x)) and
                 min_cost > cost):
             min_cost = cost
             node = viable_node
@@ -89,15 +89,17 @@ def compute_direction(x_stack, n_features):
     """Compute the direction of the updates on x"""
     x_directions = np.zeros(n_features, dtype=np.int64)
     if len(x_stack) >= 2:  # The 1st x is the input.
-        x_directions = np.sign(x_stack[-1] - x_stack[0]).astype(np.int64)
+        x_directions = np.get_sign(x_stack[-1] - x_stack[0]).astype(np.int64)
     return x_directions
 
 
-def random_forest_attack(model, x, y,
+# TODO: Write this as a class
+def random_forest_attack(model, x, y=None,
                          max_budget=None,
                          epsilon=1e-4,
                          rule='least_leaf'):
-    """Generating an adversarial example from a scikit-learn Random Forest classifier
+    """Generating an adversarial example from a scikit-learn Random Forest
+    classifier.
 
     Parameters
     ----------
@@ -107,8 +109,9 @@ def random_forest_attack(model, x, y,
     x : {array-like}, shape (1, n_features)
         A single input data point.
 
-    y : {array-like}, shape (1, 1)
-        The corresponding label of the given x.
+    y : {array-like}, shape (1, 1), default=None
+        The corresponding label of the given x. The default setting will use the
+        predictions.
 
     max_budget : float, default=0.1 * n_features
         The maximum budget is allowed for mutating the input.
@@ -116,7 +119,8 @@ def random_forest_attack(model, x, y,
     epsilon : float, default=1e-4
         The value which adds on top of the threshold.
 
-    rule : {'least_leaf', 'least_root', 'least_global', 'random'},  default='least_leaf'
+    rule : {'least_leaf', 'least_root', 'least_global', 'random'}, 
+    default='least_leaf'
         The rule will be used to find the next node from existing paths.
 
     Returns
@@ -127,6 +131,8 @@ def random_forest_attack(model, x, y,
     m = x.shape[1]  # Number of input features
     if max_budget is None:
         max_budget = 0.1 * m
+    if y is None:
+        y = model.predict(x)
     budget = max_budget
     x_stack = [x.squeeze()]  # Expect format [[x0, x1, ...]]
     x_directions = np.zeros(m, dtype=np.int64)
@@ -162,6 +168,7 @@ def random_forest_attack(model, x, y,
             if len(np.where(change != 0)) > 1:
                 print('DEBUG', change)
             if budget < -10:
+                # TODO: fix infinite cost
                 print('DEBUG', budget)
             budget += np.abs(np.sum(change))
             current_paths = paths_stack[-1]
@@ -177,12 +184,12 @@ def random_forest_attack(model, x, y,
         next_x = node.get_next_x(last_x, epsilon)
         x_stack.append(next_x)
         # UPDATE 2) Reduce budget
-        cost = node.cost(last_x, x_directions, epsilon)
+        cost = node.get_cost(last_x, x_directions, epsilon)
         if cost == np.inf:
             print('DEBUG', cost)
         budget -= cost
         # UPDATE 3) Update direction
-        x_directions[node.feature_index] = node.sign(last_x)
+        x_directions[node.feature_index] = node.get_sign(last_x)
         # UPDATE 4) Append path
         # WARNING: After this call, the node with min cost will switch to the next least node.
         node.set_visited()
