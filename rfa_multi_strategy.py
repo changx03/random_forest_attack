@@ -1,75 +1,39 @@
-"""Random Forest Attack Version 0.2
+"""Random Forest Attack Version 0.2 with multiple node picking strategy
 """
 import random
 
 import numpy as np
 
 
-class Path():
-    """A Path is used by a single Decision Tree Estimator for a given input."""
+class Node():
+    def __init__(self, feature_index, threshold):
+        self.feature_index = feature_index
+        self.threshold = threshold
+        self.is_visited = False
 
-    def __init__(self,
-                 x,
-                 feature_indices,
-                 thresholds,
-                 epsilon):
-        self.x = np.squeeze(x)
-        self.feature_indices = feature_indices
-        self.thresholds = thresholds
-        self.epsilon = epsilon
-        assert self.feature_indices.shape == self.thresholds.shape, \
-            "feature_indices and thresholds should have same shape."
-        self.visited_list = np.zeros(self.feature_indices.shape, dtype=bool)
+    def sign(self, x):
+        """Returns the direction of the cost"""
+        return 1 if x[self.feature_index] <= self.threshold else -1
 
-    @property
-    def last_unvisited_index(self):
-        """The index of the last unvisited node."""
-        # search from the end
-        for i, is_visited in reversed(list(enumerate(self.visited_list))):
-            if is_visited != True:
-                return i
-        return -1
-
-    @property
-    def last_node(self):
-        """Returns the last unvisited node."""
-        idx = self.last_unvisited_index
-        if idx == -1:
-            return None
-        return {
-            'feature_index': self.feature_indices[idx],
-            'threshold': self.thresholds[idx]
-        }
-
-    @property
-    def sign(self):
-        """The direction of the cost."""
-        node = self.last_node
-        if node is None:
-            return 1
-        return 1 if self.x[node['feature_index']] <= node['threshold'] else -1
-
-    @property
-    def cost(self):
-        """The absolute cost to switch the branch."""
-        node = self.last_node
-        if node is None:
+    def cost(self, x, directions, epsilon):
+        """Returns the cost of switching this branch"""
+        if self.is_visited:
             return np.inf
-        return np.abs(self.x[node['feature_index']] - node['threshold']) + self.epsilon
+        if (directions[self.feature_index] != 0 and
+                self.sign(x) != directions[self.feature_index]):
+            return np.inf
+        return np.abs(x[self.feature_index] - self.threshold) + epsilon
 
-    def get_next_x(self):
-        """The value is required to switch the branch."""
-        node = self.last_node
-        x = np.copy(self.x)
-        if node is None:
-            return x
-        x[node['feature_index']] += self.sign * self.cost
-        return x
+    def get_next_x(self, x, epsilon):
+        """Returns the updated x"""
+        next_x = np.copy(x)
+        next_x[self.feature_index] += self.sign(x) * (
+            np.abs(x[self.feature_index] - self.threshold) + epsilon)
+        return next_x
 
-    def visit_last_node(self):
-        """Marks the last node as visited."""
-        idx = self.last_unvisited_index
-        self.visited_list[idx] = True
+    def set_visited(self):
+        """Set this node to visited"""
+        self.is_visited = True
 
 
 def build_paths(model, x, y, epsilon):
@@ -83,39 +47,42 @@ def build_paths(model, x, y, epsilon):
             continue
         # Get path indices
         # csr_matrix.nonzero() returns (row, col). We only need column indices.
-        path_node_idx = estimator.decision_path(x).nonzero()[1]
-        path_node_idx = path_node_idx[:-1]  # The last node is the output node
+        node_indices = estimator.decision_path(x).nonzero()[1]
+        node_indices = node_indices[:-1]  # The last node is the output node
 
         # Find feature indices and thresholds
         tree = estimator.tree_
-        feature_indices = np.array(tree.feature[path_node_idx])
-        thresholds = np.array(tree.threshold[path_node_idx])
-
-        path = Path(x, feature_indices, thresholds, epsilon)
+        path = [Node(tree.feature[i], tree.threshold[i]) for i in node_indices]
         paths.append(path)
     return paths
 
 
-def pick_least_leaf(paths, x_directions):
+def pick_least_leaf(paths, x,  directions, epsilon):
     """Finds the path with minimum cost."""
     min_cost = np.inf
-    min_path = None
+    node = None
     for path in paths:
-        if path.last_node is None:  # No viable node
+        # find least unvisited node
+        viable_node = None
+        for node in reversed(path):
+            if not node.is_visited:
+                viable_node = node
+                break
+        # check direction
+        if viable_node is None:
             continue
-        feature_idx = path.last_node['feature_index']
-        # lowest cost and same direction (0 means it can go either way)
-        if (min_cost > path.cost and
-            (x_directions[feature_idx] == 0 or
-             path.sign == x_directions[feature_idx])):
-            min_cost = path.cost
-            min_path = path
-    return min_path
+        direction = directions[viable_node.feature_index]
+        cost = viable_node.cost(x, directions, epsilon)
+        if ((direction == 0 or direction == viable_node.sign(x)) and
+                min_cost > cost):
+            min_cost = cost
+            node = viable_node
+    return node
 
 
-def find_next_path(paths, x_directions, rule):
+def find_next_path(paths, x, directions, epsilon, rule):
     if rule == 'least_leaf':
-        return pick_least_leaf(paths, x_directions)
+        return pick_least_leaf(paths, x, directions, epsilon)
 
 
 def compute_direction(x_stack, n_features):
@@ -172,13 +139,14 @@ def random_forest_attack(model, x, y,
             return x_stack[-1].reshape(x.shape)
 
         # Pick a node
-        least_cost_path = find_next_path(paths_stack[-1], x_directions, rule)
-        if (least_cost_path is None and
-                len(paths_stack) == 1 and
-                len(x_stack) == 1):  # No more viable node at the root
+        last_x = x_stack[-1]
+        node = find_next_path(paths_stack[-1], last_x,
+                              x_directions, epsilon, rule)
+        if (node is None and len(paths_stack) == 1 and len(x_stack) == 1):
+            # No more viable node at the root
             break
 
-        while least_cost_path is None or budget < 0:
+        while node is None or budget < 0:
             # Current branch has no viable path. Go up!
             # Don't remove the root
             if len(paths_stack) > 1 and len(x_stack) > 1:
@@ -191,26 +159,33 @@ def random_forest_attack(model, x, y,
             x_directions = compute_direction(x_stack, m)
             # RESTORE: budget
             change = last_x - x_stack[-1]
+            if len(np.where(change != 0)) > 1:
+                print('DEBUG', change)
+            if budget < -10:
+                print('DEBUG', budget)
             budget += np.abs(np.sum(change))
             current_paths = paths_stack[-1]
-            least_cost_path = find_next_path(current_paths, x_directions, rule)
+            node = find_next_path(current_paths, last_x,
+                                  x_directions, epsilon, rule)
 
-            if least_cost_path is None:
+            if node is None:
                 # No viable perturbation within the budget. Exit
                 return x_stack[-1].reshape(x.shape)
 
         # UPDATE: Order matters!
         # UPDATE 1) Append x
-        next_x = least_cost_path.get_next_x()
+        next_x = node.get_next_x(last_x, epsilon)
         x_stack.append(next_x)
         # UPDATE 2) Reduce budget
-        budget -= least_cost_path.cost
+        cost = node.cost(last_x, x_directions, epsilon)
+        if cost == np.inf:
+            print('DEBUG', cost)
+        budget -= cost
         # UPDATE 3) Update direction
-        feature_index = least_cost_path.last_node['feature_index']
-        x_directions[feature_index] = least_cost_path.sign
+        x_directions[node.feature_index] = node.sign(last_x)
         # UPDATE 4) Append path
         # WARNING: After this call, the node with min cost will switch to the next least node.
-        least_cost_path.visit_last_node()
+        node.set_visited()
         next_paths = build_paths(model, next_x, y, epsilon)
         paths_stack.append(next_paths)
 
