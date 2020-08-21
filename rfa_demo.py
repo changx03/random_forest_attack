@@ -12,9 +12,9 @@ from rfa import RandomForestAttack
 
 # ------------------------------------------------------------------------------
 # Select a dataset
-# DATASET = 'MNIST'
+DATASET = 'MNIST'
 # DATASET = 'IRIS'
-DATASET = 'BREAST_CANCER'
+# DATASET = 'BREAST_CANCER'
 
 SHOW_X = True
 if DATASET == 'MNIST':
@@ -53,10 +53,13 @@ X_train, X_test, y_train, y_test = train_test_split(
 
 # ------------------------------------------------------------------------------
 # Hyperparameters
-N_THREADS = multiprocessing.cpu_count()
+# N_THREADS = multiprocessing.cpu_count()
+N_THREADS = 1
 N_TREES = 12
+# rule : {'least_leaf', 'least_root', 'least_global', 'random'}
+PICK_RULE = 'least_global'
 EPSILON = 1e-4  # The minimum change to update a feature.
-SINGLE_BUDGET = 0.1
+SINGLE_BUDGET = 0.01
 MAX_BUDGET = SINGLE_BUDGET * X.shape[1]   # The max. perturbation is allowed.
 SIZE = 100 if len(X_test) >= 100 else len(X_test)
 
@@ -69,9 +72,9 @@ def main():
     classifier = RandomForestClassifier(n_estimators=N_TREES)
     classifier.fit(X_train, y_train)
 
-    print('Accuracy on train set: {:.2f}%'.format(
+    print('Accuracy on train set: {:6.2f}%'.format(
         classifier.score(X_train, y_train) * 100))
-    print('Accuracy on test set: {:.2f}%'.format(
+    print('Accuracy on  test set: {:6.2f}%'.format(
         classifier.score(X_test, y_test) * 100))
 
     X_adv = np.zeros((SIZE, X_test.shape[1]), dtype=X_test.dtype)
@@ -81,7 +84,7 @@ def main():
     attack = RandomForestAttack(classifier,
                                 max_budget=MAX_BUDGET,
                                 epsilon=EPSILON,
-                                rule='least_leaf',
+                                rule=PICK_RULE,
                                 n_threads=N_THREADS)
     start = time.time()
 
@@ -93,11 +96,11 @@ def main():
 
     y_pred = classifier.predict(X_test[:SIZE])
     acc = np.count_nonzero(y_pred == y_test[:SIZE]) / SIZE * 100.0
-    print('Accuracy on test set = {:.2f}%'.format(acc))
+    print('Accuracy on                test set = {:6.2f}%'.format(acc))
 
     adv_pred = classifier.predict(np.array(X_adv))
     acc = np.count_nonzero(adv_pred == y_test[:SIZE]) / SIZE * 100.0
-    print('Accuracy on adversarial example set = {:.2f}%'.format(acc))
+    print('Accuracy on adversarial example set = {:6.2f}%'.format(acc))
 
     l2_norm = np.mean(np.linalg.norm(X_test[:SIZE] - X_adv, axis=1))
     print('Average l2 norm = {:.3f}'.format(l2_norm))

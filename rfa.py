@@ -65,6 +65,7 @@ class RandomForestAttack():
         self.epsilon = epsilon
         self.rule = rule
         self.n_threads = multiprocessing.cpu_count() if n_threads == -1 else n_threads
+        self.n_trees = len(self.classifier.estimators_)
         self.n_features = 0
         self._X = None
         self._y = None
@@ -97,12 +98,100 @@ class RandomForestAttack():
             self.max_budget = 0.1 * self.n_features
         self._X_adv = np.zeros(X.shape, dtype=X.dtype)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.n_threads) as executor:
-            executor.map(self.__generate_single, range(len(self._X)))
+        if self.n_threads == 1:
+            for i in range(len(self._X)):
+                self.__generate_single(i)
+        else:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=self.n_threads) as executor:
+                executor.map(self.__generate_single, range(len(self._X)))
         return self._X_adv
 
+    def __pick_random_node(self, x, paths, directions):
+        """Select a node at random"""
+        node = None
+        candidates = []
+        for i, path in enumerate(paths):
+            for j, node in enumerate(path):
+                direction = directions[node.feature_index]
+                if (not node.is_visited and
+                        (direction == 0 or direction == node.get_sign(x))):
+                    candidates.append({'path_index': i, 'node_index': j})
+        if len(candidates) == 0:
+            return None
+        selected_index = np.random.choice(candidates)
+        return paths[selected_index['path_index']][selected_index['node_index']]
+
+    def __pick_least_leaf(self, x, paths, directions):
+        """Find a last leaf node with least cost"""
+        min_cost = np.inf
+        min_node = None
+        for path in paths:
+            # find least unvisited node
+            for node in reversed(path):
+                direction = directions[node.feature_index]
+                # Find last unvisited node
+                if not node.is_visited:
+                    # Same direction
+                    if direction == 0 or direction == node.get_sign(x):
+                        cost = node.get_cost(x, self.epsilon)
+                        if min_cost > cost:
+                            min_cost = cost
+                            min_node = node
+                    break  # Only check the last leaf node. Look no further
+        return min_node
+
+    def __pick_least_root(self, x, paths, directions):
+        """Find a root node with the least cost"""
+        min_cost = np.inf
+        min_node = None
+        for path in paths:
+            # find least unvisited node
+            for node in path:
+                direction = directions[node.feature_index]
+                # Find last unvisited node
+                if not node.is_visited:
+                    # Same direction
+                    if direction == 0 or direction == node.get_sign(x):
+                        cost = node.get_cost(x, self.epsilon)
+                        if min_cost > cost:
+                            min_cost = cost
+                            min_node = node
+                    # Only check the first unvisited node from the root. Look no further
+                    break
+        return min_node
+
+    def __pick_least_global(self, x, paths, directions):
+        """Find the node with the least cost from the entire pool"""
+        min_cost = np.inf
+        min_node = None
+        for path in paths:
+            # find least unvisited node
+            for node in path:
+                direction = directions[node.feature_index]
+                # unvisited and in same direction
+                if (not node.is_visited and
+                        (direction == 0 or direction == node.get_sign(x))):
+                    cost = node.get_cost(x, self.epsilon)
+                    if min_cost > cost:
+                        min_cost = cost
+                        min_node = node
+        return min_node
+
+    def __find_next_node(self, x, paths, directions):
+        """Find next node based on the given rule."""
+        if self.rule == 'random':
+            return self.__pick_random_node(x, paths, directions)
+        elif self.rule == 'least_leaf':
+            return self.__pick_least_leaf(x, paths, directions)
+        elif self.rule == 'least_root':
+            return self.__pick_least_root(x, paths, directions)
+        elif self.rule == 'least_global':
+            return self.__pick_least_global(x, paths, directions)
+        else:
+            raise NotImplementedError('Not implement another methods yet!')
+
     def __build_paths(self, x, y):
-        """Returns an array of paths with the correct prediction."""
+        """Return an array of paths with the correct prediction."""
         estimators = self.classifier.estimators_  # An array of DecisionTreeClassifier
         paths = []
         x = np.expand_dims(x, axis=0)
@@ -122,32 +211,6 @@ class RandomForestAttack():
                     for i in node_indices]
             paths.append(path)
         return paths
-
-    def __pick_least_leaf(self, x, paths, directions):
-        """Finds the last leaf node with least cost"""
-        min_cost = np.inf
-        min_node = None
-        for path in paths:
-            # find least unvisited node
-            for node in reversed(path):
-                direction = directions[node.feature_index]
-                # Find last unvisited node
-                if not node.is_visited:
-                    # Same direction
-                    if direction == 0 or direction == node.get_sign(x):
-                        cost = node.get_cost(x, self.epsilon)
-                        if min_cost > cost:
-                            min_cost = cost
-                            min_node = node
-                    break  # Only check the last leaf node. Look no further
-        return min_node
-
-    def __find_next_node(self, x, paths, directions):
-        """Find next node based on the given rule."""
-        if self.rule == 'least_leaf':
-            return self.__pick_least_leaf(x, paths, directions)
-        else:
-            raise NotImplementedError('Not implement another methods yet!')
 
     def __compute_direction(self, x_stack):
         """Compute the direction of the updates on x"""
