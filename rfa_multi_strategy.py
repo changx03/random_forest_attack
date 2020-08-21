@@ -1,4 +1,4 @@
-"""Random Forest Attack Version 0.2 with multiple node picking strategy
+"""Random Forest Attack Version 0.3 with multiple node picking strategy
 """
 import random
 
@@ -15,20 +15,15 @@ class Node():
         """Returns the direction of the cost"""
         return 1 if x[self.feature_index] <= self.threshold else -1
 
-    def get_cost(self, x, directions, epsilon):
+    def get_cost(self, x, epsilon):
         """Returns the cost of switching this branch"""
-        if self.is_visited:
-            return np.inf
-        if (directions[self.feature_index] != 0 and
-                self.get_sign(x) != directions[self.feature_index]):
-            return np.inf
         return np.abs(x[self.feature_index] - self.threshold) + epsilon
 
     def get_next_x(self, x, epsilon):
         """Returns the updated x"""
         next_x = np.copy(x)
-        next_x[self.feature_index] += self.get_sign(x) * (
-            np.abs(x[self.feature_index] - self.threshold) + epsilon)
+        next_x[self.feature_index] += (
+            self.get_sign(x) * self.get_cost(x, epsilon))
         return next_x
 
     def set_visited(self):
@@ -58,29 +53,27 @@ def build_paths(model, x, y, epsilon):
 
 
 def pick_least_leaf(paths, x,  directions, epsilon):
-    """Finds the path with minimum cost."""
+    """Finds the last leaf node with least cost"""
     min_cost = np.inf
-    node = None
+    min_node = None
     for path in paths:
         # find least unvisited node
-        viable_node = None
         for node in reversed(path):
+            direction = directions[node.feature_index]
+            # Find last unvisited node
             if not node.is_visited:
-                viable_node = node
-                break
-        # check direction
-        if viable_node is None:
-            continue
-        direction = directions[viable_node.feature_index]
-        cost = viable_node.get_cost(x, directions, epsilon)
-        if ((direction == 0 or direction == viable_node.get_sign(x)) and
-                min_cost > cost):
-            min_cost = cost
-            node = viable_node
-    return node
+                # Same direction
+                if direction == 0 or direction == node.get_sign(x):
+                    cost = node.get_cost(x, epsilon)
+                    if min_cost > cost:
+                        min_cost = cost
+                        min_node = node
+                break  # Only check the last leaf node. Look no further
+    return min_node
 
 
-def find_next_path(paths, x, directions, epsilon, rule):
+def find_next_node(paths, x, directions, epsilon, rule):
+    """Find next node based on the given rule."""
     if rule == 'least_leaf':
         return pick_least_leaf(paths, x, directions, epsilon)
 
@@ -89,7 +82,7 @@ def compute_direction(x_stack, n_features):
     """Compute the direction of the updates on x"""
     x_directions = np.zeros(n_features, dtype=np.int64)
     if len(x_stack) >= 2:  # The 1st x is the input.
-        x_directions = np.get_sign(x_stack[-1] - x_stack[0]).astype(np.int64)
+        x_directions = np.sign(x_stack[-1] - x_stack[0]).astype(np.int64)
     return x_directions
 
 
@@ -146,7 +139,7 @@ def random_forest_attack(model, x, y=None,
 
         # Pick a node
         last_x = x_stack[-1]
-        node = find_next_path(paths_stack[-1], last_x,
+        node = find_next_node(paths_stack[-1], last_x,
                               x_directions, epsilon, rule)
         if (node is None and len(paths_stack) == 1 and len(x_stack) == 1):
             # No more viable node at the root
@@ -154,46 +147,39 @@ def random_forest_attack(model, x, y=None,
 
         while node is None or budget < 0:
             # Current branch has no viable path. Go up!
-            # Don't remove the root
             if len(paths_stack) > 1 and len(x_stack) > 1:
                 paths_stack.pop()
                 last_x = x_stack.pop()
-            else:
+                # RESTORE: budget
+                budget += np.abs(np.sum(last_x - x_stack[-1]))
+            else:  # If already at the root, don't remove the root
                 last_x = x_stack[0]
+                # RESET: budget
+                budget = max_budget
 
             # RESTORE: direction
             x_directions = compute_direction(x_stack, m)
-            # RESTORE: budget
-            change = last_x - x_stack[-1]
-            if len(np.where(change != 0)) > 1:
-                print('DEBUG', change)
-            if budget < -10:
-                # TODO: fix infinite cost
-                print('DEBUG', budget)
-            budget += np.abs(np.sum(change))
+
             current_paths = paths_stack[-1]
-            node = find_next_path(current_paths, last_x,
+            node = find_next_node(current_paths, x_stack[-1],
                                   x_directions, epsilon, rule)
 
             if node is None:
                 # No viable perturbation within the budget. Exit
                 return x_stack[-1].reshape(x.shape)
 
-        # UPDATE: Order matters!
-        # UPDATE 1) Append x
-        next_x = node.get_next_x(last_x, epsilon)
-        x_stack.append(next_x)
-        # UPDATE 2) Reduce budget
-        cost = node.get_cost(last_x, x_directions, epsilon)
-        if cost == np.inf:
-            print('DEBUG', cost)
-        budget -= cost
-        # UPDATE 3) Update direction
-        x_directions[node.feature_index] = node.get_sign(last_x)
-        # UPDATE 4) Append path
-        # WARNING: After this call, the node with min cost will switch to the next least node.
+        # UPDATE:
+        # UPDATE 1) Reduce budget
+        budget -= node.get_cost(x_stack[-1], epsilon)
+        # UPDATE 2) Update direction
+        x_directions[node.feature_index] = node.get_sign(x_stack[-1])
+        # Make the node as visited
         node.set_visited()
+        # UPDATE 3) Append next x and new path
+        # Order matters!
+        next_x = node.get_next_x(x_stack[-1], epsilon)
         next_paths = build_paths(model, next_x, y, epsilon)
+        x_stack.append(next_x)
         paths_stack.append(next_paths)
 
     # If the code reaches this line, it means it cannot find viable adversarial example.
