@@ -1,8 +1,6 @@
-import concurrent.futures
 import multiprocessing
 import os
 import pickle
-import random
 import time
 
 import numpy as np
@@ -10,19 +8,15 @@ from sklearn.datasets import fetch_openml, load_breast_cancer, load_iris
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 
-from rfa_multi_strategy import random_forest_attack
+from rfa import RandomForestAttack
 
-N_THREADS = multiprocessing.cpu_count()
-
-# Hyperparameters
-N_TREES = 32
-EPSILON = 1e-4  # The minimum change to update a feature.
-SINGLE_BUDGET = 0.01
+# ------------------------------------------------------------------------------
+# Select a dataset
 # DATASET = 'MNIST'
-DATASET = 'IRIS'
+# DATASET = 'IRIS'
 DATASET = 'BREAST_CANCER'
-SHOW_X = True
 
+SHOW_X = True
 if DATASET == 'MNIST':
     # Load MNIST dataset from OpenML
     SHOW_X = False
@@ -57,34 +51,14 @@ X = 1 - 2 * (X - X_min)/(X_max - X_min)
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=(10000 if DATASET == 'MNIST' else 0.2))
 
-
+# ------------------------------------------------------------------------------
+# Hyperparameters
+N_THREADS = multiprocessing.cpu_count()
+N_TREES = 12
+EPSILON = 1e-4  # The minimum change to update a feature.
+SINGLE_BUDGET = 0.1
 MAX_BUDGET = SINGLE_BUDGET * X.shape[1]   # The max. perturbation is allowed.
 SIZE = 100 if len(X_test) >= 100 else len(X_test)
-
-
-def thread_function(model, X_adv, i):
-    _x = np.expand_dims(X_test[i], axis=0)
-    _y = np.expand_dims(y_test[i], axis=0).astype(np.int64)
-    if SHOW_X:
-        print('[{:3d}] {:11s}: X=[{}], y={}, pred={}'.format(
-            i, 'Clean',
-            str(','.join(['{:5.2f}'.format(xx) for xx in _x[0]])),
-            _y[0], model.predict(_x)[0]))
-
-    adv = random_forest_attack(model, _x, _y,
-                               max_budget=MAX_BUDGET,
-                               epsilon=EPSILON,
-                               rule='least_leaf')
-    X_adv[i] = adv.flatten()
-
-    if SHOW_X:
-        print('[{:3d}] {:11s}: X=[{}], y={}, pred={}'.format(
-            i, 'Adversarial',
-            str(','.join(['{:5.2f}'.format(xx) for xx in adv[0]])),
-            _y[0], model.predict(adv)[0]))
-    else:
-        print('[{:3d}] y={}, clean pred={}, adv pred={}'.format(
-            i, _y[0], model.predict(_x)[0], model.predict(adv)[0]))
 
 
 def main():
@@ -92,35 +66,36 @@ def main():
     print('Test set: ', X_test.shape)
 
     # Train model
-    model = RandomForestClassifier(n_estimators=N_TREES)
-    model.fit(X_train, y_train)
+    classifier = RandomForestClassifier(n_estimators=N_TREES)
+    classifier.fit(X_train, y_train)
 
     print('Accuracy on train set: {:.2f}%'.format(
-        model.score(X_train, y_train) * 100))
+        classifier.score(X_train, y_train) * 100))
     print('Accuracy on test set: {:.2f}%'.format(
-        model.score(X_test, y_test) * 100))
+        classifier.score(X_test, y_test) * 100))
 
     X_adv = np.zeros((SIZE, X_test.shape[1]), dtype=X_test.dtype)
     print('Number of threads: {}'.format(N_THREADS))
     print('Genearting {} adversarial examples'.format(SIZE))
+
+    attack = RandomForestAttack(classifier,
+                                max_budget=MAX_BUDGET,
+                                epsilon=EPSILON,
+                                rule='least_leaf',
+                                n_threads=N_THREADS)
     start = time.time()
 
-    # Threading version
-    # with concurrent.futures.ThreadPoolExecutor(max_workers=N_THREADS) as executor:
-    #     executor.map(lambda i: thread_function(model, X_adv, i), range(SIZE))
+    X_adv = attack.generate(X_test[:SIZE], y_test[:SIZE])
 
-    # Sequential version
-    for i in range(SIZE):
-        thread_function(model, X_adv, i)
     time_elapsed = time.time() - start
     print('Time to complete: {:d}m {:.3f}s'.format(
         int(time_elapsed // 60), time_elapsed % 60))
 
-    y_pred = model.predict(X_test[:SIZE])
+    y_pred = classifier.predict(X_test[:SIZE])
     acc = np.count_nonzero(y_pred == y_test[:SIZE]) / SIZE * 100.0
     print('Accuracy on test set = {:.2f}%'.format(acc))
 
-    adv_pred = model.predict(np.array(X_adv))
+    adv_pred = classifier.predict(np.array(X_adv))
     acc = np.count_nonzero(adv_pred == y_test[:SIZE]) / SIZE * 100.0
     print('Accuracy on adversarial example set = {:.2f}%'.format(acc))
 

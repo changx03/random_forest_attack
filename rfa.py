@@ -1,218 +1,218 @@
-"""Random Forest Attack Version 0.2
+"""Random Forest Attack Version 0.3 with multiple node picking strategy
 """
 import random
+import concurrent.futures
+import multiprocessing
 
 import numpy as np
 
 
-class Path():
-    """A Path is used by a single Decision Tree Estimator for a given input."""
+class Node():
+    def __init__(self, feature_index, threshold):
+        self.feature_index = feature_index
+        self.threshold = threshold
+        self.is_visited = False
 
+    def get_sign(self, x):
+        """Returns the direction of the cost"""
+        return 1 if x[self.feature_index] <= self.threshold else -1
+
+    def get_cost(self, x, epsilon):
+        """Returns the cost of switching this branch"""
+        return np.abs(x[self.feature_index] - self.threshold) + epsilon
+
+    def get_next_x(self, x, epsilon):
+        """Returns the updated x"""
+        next_x = np.copy(x)
+        next_x[self.feature_index] += (
+            self.get_sign(x) * self.get_cost(x, epsilon))
+        return next_x
+
+    def set_visited(self):
+        """Set this node to visited"""
+        self.is_visited = True
+
+
+class RandomForestAttack():
     def __init__(self,
-                 x,
-                 feature_indices,
-                 thresholds,
-                 epsilon):
-        self.x = np.squeeze(x)
-        self.feature_indices = feature_indices
-        self.thresholds = thresholds
+                 classifier,
+                 max_budget=None,
+                 epsilon=1e-4,
+                 rule='least_leaf',
+                 n_threads=1):
+        """An adversarial attack algorithm for attacking Random Forest classifier and other similar ensemble tree 
+        classifiers.
+
+        Parameters
+        ----------
+        classifier : sklearn.ensemble.RandomForestClassifier
+            A trained Random Forest Classifier.
+
+        max_budget : float, default=0.1 * n_features
+            The maximum budget is allowed for mutating the input.
+
+        epsilon : float, default=1e-4
+            The value which adds on top of the threshold.
+
+        rule : {'least_leaf', 'least_root', 'least_global', 'random'}, default='least_leaf'
+            The rule will be used to find the next node from existing paths.
+
+        n_threads : int, default=1
+            The number of threads. If threads = -1, the program uses all cores.
+        """
+        self.classifier = classifier
+        self.max_budget = max_budget
         self.epsilon = epsilon
-        assert self.feature_indices.shape == self.thresholds.shape, \
-            "feature_indices and thresholds should have same shape."
-        self.visited_list = np.zeros(self.feature_indices.shape, dtype=bool)
+        self.rule = rule
+        self.n_threads = multiprocessing.cpu_count() if n_threads == -1 else n_threads
+        self.n_features = 0
+        self._X = None
+        self._y = None
+        self._X_adv = None
 
-    @property
-    def last_unvisited_index(self):
-        """The index of the last unvisited node."""
-        # search from the end
-        for i, is_visited in reversed(list(enumerate(self.visited_list))):
-            if is_visited != True:
-                return i
-        return -1
+    def generate(self, X, y=None):
+        """Generate adversarial examples.
 
-    @property
-    def last_node(self):
-        """Returns the last unvisited node."""
-        idx = self.last_unvisited_index
-        if idx == -1:
-            return None
-        return {
-            'feature_index': self.feature_indices[idx],
-            'threshold': self.thresholds[idx]
-        }
+            Parameters
+        ----------
+        X : {array-like}, shape (1, n_features)
+            A single input data point.
 
-    @property
-    def sign(self):
-        """The direction of the cost."""
-        node = self.last_node
-        if node is None:
-            return 1
-        return 1 if self.x[node['feature_index']] <= node['threshold'] else -1
+        y : {array-like}, shape (1, 1), default=None
+            The corresponding label of the given x. The default setting will use the
+            predictions.
 
-    @property
-    def cost(self):
-        """The absolute cost to switch the branch."""
-        node = self.last_node
-        if node is None:
-            return np.inf
-        return np.abs(self.x[node['feature_index']] - node['threshold']) + self.epsilon
+        Returns
+        -------
+        X_adv : {array-like}, shape (1, n_features)
+            The adversarial example based on the input x.
+        """
+        self._X = X
+        if y is not None:
+            assert len(X) == len(
+                y), 'Labels and data points must have same size.'
+        self._y = self.classifier.predict(X) if y is None else y
+        self.n_features = X.shape[1]  # Number of input features
+        if self.max_budget is None:
+            self.max_budget = 0.1 * self.n_features
+        self._X_adv = np.zeros(X.shape, dtype=X.dtype)
 
-    def get_next_x(self):
-        """The value is required to switch the branch."""
-        node = self.last_node
-        x = np.copy(self.x)
-        if node is None:
-            return x
-        x[node['feature_index']] += self.sign * self.cost
-        return x
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.n_threads) as executor:
+            executor.map(self.__generate_single, range(len(self._X)))
+        return self._X_adv
 
-    def visit_last_node(self):
-        """Marks the last node as visited."""
-        idx = self.last_unvisited_index
-        self.visited_list[idx] = True
+    def __build_paths(self, x, y):
+        """Returns an array of paths with the correct prediction."""
+        estimators = self.classifier.estimators_  # An array of DecisionTreeClassifier
+        paths = []
+        x = np.expand_dims(x, axis=0)
+        for i, estimator in enumerate(estimators):
+            pred = estimator.predict(x)
+            if pred[0] != y:  # Already misclassified, ignore this path
+                continue
+            # Get path indices
+            # csr_matrix.nonzero() returns (row, col). We only need column indices.
+            node_indices = estimator.decision_path(x).nonzero()[1]
+            # The last node is the output node
+            node_indices = node_indices[:-1]
 
+            # Find feature indices and thresholds
+            tree = estimator.tree_
+            path = [Node(tree.feature[i], tree.threshold[i])
+                    for i in node_indices]
+            paths.append(path)
+        return paths
 
-def build_paths(model, x, y, epsilon):
-    """Returns an array of paths with the correct prediction."""
-    estimators = model.estimators_  # An array of DecisionTreeClassifier
-    paths = []
-    x = np.expand_dims(x, axis=0)
-    for i, estimator in enumerate(estimators):
-        pred = estimator.predict(x)
-        if pred[0] != y[0]:  # Already misclassified, ignore this path
-            continue
-        # Get path indices
-        # csr_matrix.nonzero() returns (row, col). We only need column indices.
-        path_node_idx = estimator.decision_path(x).nonzero()[1]
-        path_node_idx = path_node_idx[:-1]  # The last node is the output node
+    def __pick_least_leaf(self, x, paths, directions):
+        """Finds the last leaf node with least cost"""
+        min_cost = np.inf
+        min_node = None
+        for path in paths:
+            # find least unvisited node
+            for node in reversed(path):
+                direction = directions[node.feature_index]
+                # Find last unvisited node
+                if not node.is_visited:
+                    # Same direction
+                    if direction == 0 or direction == node.get_sign(x):
+                        cost = node.get_cost(x, self.epsilon)
+                        if min_cost > cost:
+                            min_cost = cost
+                            min_node = node
+                    break  # Only check the last leaf node. Look no further
+        return min_node
 
-        # Find feature indices and thresholds
-        tree = estimator.tree_
-        feature_indices = np.array(tree.feature[path_node_idx])
-        thresholds = np.array(tree.threshold[path_node_idx])
+    def __find_next_node(self, x, paths, directions):
+        """Find next node based on the given rule."""
+        if self.rule == 'least_leaf':
+            return self.__pick_least_leaf(x, paths, directions)
+        else:
+            raise NotImplementedError('Not implement another methods yet!')
 
-        path = Path(x, feature_indices, thresholds, epsilon)
-        paths.append(path)
-    return paths
+    def __compute_direction(self, x_stack):
+        """Compute the direction of the updates on x"""
+        x_directions = np.zeros(self.n_features, dtype=np.int64)
+        if len(x_stack) >= 2:  # The 1st x is the input.
+            x_directions = np.sign(x_stack[-1] - x_stack[0]).astype(np.int64)
+        return x_directions
 
+    def __generate_single(self, i):
+        if (i+1) % 10 == 0:
+            print('String the {:4d}th data point...'.format(i+1))
+        y = self._y[i]
+        budget = self.max_budget
+        x_stack = [self._X[i]]
+        x_directions = np.zeros(self.n_features, dtype=np.int64)
+        # Expect format [[node1, node2, ...], [node3, node4, ...], ...]
+        paths_stack = [self.__build_paths(x_stack[0], y)]
 
-def pick_least_leaf(paths, x_directions):
-    """Finds the path with minimum cost."""
-    min_cost = np.inf
-    min_path = None
-    for path in paths:
-        if path.last_node is None:  # No viable node
-            continue
-        feature_idx = path.last_node['feature_index']
-        # lowest cost and same direction (0 means it can go either way)
-        if (min_cost > path.cost and
-            (x_directions[feature_idx] == 0 or
-             path.sign == x_directions[feature_idx])):
-            min_cost = path.cost
-            min_path = path
-    return min_path
+        while True:
+            # Predict latest updated x
+            if self.classifier.predict(np.expand_dims(x_stack[-1], axis=0))[0] != y:
+                break
 
+            # Pick a node
+            node = self.__find_next_node(x_stack[-1], paths_stack[-1],
+                                         x_directions)
+            if (node is None and len(paths_stack) == 1 and len(x_stack) == 1):
+                # No more viable node at the root
+                break
 
-def find_next_path(paths, x_directions, rule):
-    if rule == 'least_leaf':
-        return pick_least_leaf(paths, x_directions)
+            while node is None or budget < 0:
+                # Current branch has no viable path. Go up!
+                if len(paths_stack) > 1 and len(x_stack) > 1:
+                    paths_stack.pop()
+                    last_x = x_stack.pop()
+                    # RESTORE: budget
+                    budget += np.abs(np.sum(last_x - x_stack[-1]))
+                else:  # If already at the root, don't remove the root
+                    # RESET: budget
+                    budget = max_budget
 
+                # RESTORE: direction
+                x_directions = self.__compute_direction(x_stack)
 
-def compute_direction(x_stack, n_features):
-    """Compute the direction of the updates on x"""
-    x_directions = np.zeros(n_features, dtype=np.int64)
-    if len(x_stack) >= 2:  # The 1st x is the input.
-        x_directions = np.sign(x_stack[-1] - x_stack[0]).astype(np.int64)
-    return x_directions
+                current_paths = paths_stack[-1]
+                node = self.__find_next_node(x_stack[-1], current_paths,
+                                             x_directions)
 
+                if node is None:
+                    # No viable perturbation within the budget. Exit
+                    self._X_adv[i] = x_stack[-1]
+                    return
 
-def random_forest_attack(model, x, y,
-                         max_budget=None,
-                         epsilon=1e-4,
-                         rule='least_leaf'):
-    """Generating an adversarial example from a scikit-learn Random Forest classifier
+            # UPDATE:
+            # UPDATE 1) Reduce budget
+            budget -= node.get_cost(x_stack[-1], self.epsilon)
+            # UPDATE 2) Update direction
+            x_directions[node.feature_index] = node.get_sign(x_stack[-1])
+            # Make the node as visited
+            node.set_visited()
+            # UPDATE 3) Append next x and new path
+            # Order matters!
+            next_x = node.get_next_x(x_stack[-1], self.epsilon)
+            next_paths = self.__build_paths(next_x, y)
+            x_stack.append(next_x)
+            paths_stack.append(next_paths)
 
-    Parameters
-    ----------
-    model : sklearn.ensemble.RandomForestClassifier
-        A trained Random Forest Classifier.
-
-    x : {array-like}, shape (1, n_features)
-        A single input data point.
-
-    y : {array-like}, shape (1, 1)
-        The corresponding label of the given x.
-
-    max_budget : float, default=0.1 * n_features
-        The maximum budget is allowed for mutating the input.
-
-    epsilon : float, default=1e-4
-        The value which adds on top of the threshold.
-
-    rule : {'least_leaf', 'least_root', 'least_global', 'random'},  default='least_leaf'
-        The rule will be used to find the next node from existing paths.
-
-    Returns
-    -------
-    x_adv : {array-like}, shape (1, n_features)
-        The adversarial example based on the input x.
-    """
-    m = x.shape[1]  # Number of input features
-    if max_budget is None:
-        max_budget = 0.1 * m
-    budget = max_budget
-    x_stack = [x.squeeze()]  # Expect format [[x0, x1, ...]]
-    x_directions = np.zeros(m, dtype=np.int64)
-    paths = build_paths(model, x_stack[0], y, epsilon)
-    paths_stack = [paths]  # Expect format [[path0, path1, ...]]
-
-    while True:
-        # Predict latest updated x
-        if model.predict(np.expand_dims(x_stack[-1], axis=0))[0] != y[0]:
-            return x_stack[-1].reshape(x.shape)
-
-        # Pick a node
-        least_cost_path = find_next_path(paths_stack[-1], x_directions, rule)
-        if (least_cost_path is None and
-                len(paths_stack) == 1 and
-                len(x_stack) == 1):  # No more viable node at the root
-            break
-
-        while least_cost_path is None or budget < 0:
-            # Current branch has no viable path. Go up!
-            # Don't remove the root
-            if len(paths_stack) > 1 and len(x_stack) > 1:
-                paths_stack.pop()
-                last_x = x_stack.pop()
-            else:
-                last_x = x_stack[0]
-
-            # RESTORE: direction
-            x_directions = compute_direction(x_stack, m)
-            # RESTORE: budget
-            change = last_x - x_stack[-1]
-            budget += np.abs(np.sum(change))
-            current_paths = paths_stack[-1]
-            least_cost_path = find_next_path(current_paths, x_directions, rule)
-
-            if least_cost_path is None:
-                # No viable perturbation within the budget. Exit
-                return x_stack[-1].reshape(x.shape)
-
-        # UPDATE: Order matters!
-        # UPDATE 1) Append x
-        next_x = least_cost_path.get_next_x()
-        x_stack.append(next_x)
-        # UPDATE 2) Reduce budget
-        budget -= least_cost_path.cost
-        # UPDATE 3) Update direction
-        feature_index = least_cost_path.last_node['feature_index']
-        x_directions[feature_index] = least_cost_path.sign
-        # UPDATE 4) Append path
-        # WARNING: After this call, the node with min cost will switch to the next least node.
-        least_cost_path.visit_last_node()
-        next_paths = build_paths(model, next_x, y, epsilon)
-        paths_stack.append(next_paths)
-
-    # If the code reaches this line, it means it cannot find viable adversarial example.
-    return x_stack[-1].reshape(x.shape)
+        self._X_adv[i] = x_stack[-1]
